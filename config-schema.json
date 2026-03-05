@@ -1,9 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ConfigFile",
+  "title": "Navgator Config",
+  "description": "Configuration file for navgator path indexing and static items.",
   "type": "object",
   "properties": {
     "$schema": {
+      "title": "Schema URL",
+      "description": "Optional JSON Schema URL for editor autocompletion and validation.",
       "default": null,
       "type": [
         "string",
@@ -11,6 +14,8 @@
       ]
     },
     "paths": {
+      "title": "Paths",
+      "description": "Path collection settings used to build the navigation list.",
       "anyOf": [
         {
           "$ref": "#/definitions/ConfigPaths"
@@ -23,9 +28,13 @@
   },
   "definitions": {
     "ConfigPaths": {
+      "title": "Path Settings",
+      "description": "Groups of folders that navgator indexes or always includes.",
       "type": "object",
       "properties": {
         "index_folders": {
+          "title": "Index Folders",
+          "description": "Directories to index; each directory and its direct child directories are included.",
           "default": [],
           "type": "array",
           "items": {
@@ -33,6 +42,8 @@
           }
         },
         "static_items": {
+          "title": "Static Items",
+          "description": "Directories or files to include as-is without indexing children.",
           "default": [],
           "type": "array",
           "items": {
