@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConfigFile",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paths": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigPaths"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "ConfigPaths": {
+      "type": "object",
+      "properties": {
+        "index_folders": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "static_items": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
