@@ -24,6 +24,18 @@
           "type": "null"
         }
       ]
+    },
+    "preview": {
+      "title": "Preview",
+      "description": "Preview panel settings.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigPreview"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {
@@ -49,6 +61,44 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "ConfigPreview": {
+      "title": "Preview Settings",
+      "description": "Settings for preview and worktree preview tabs.",
+      "type": "object",
+      "properties": {
+        "selected_worktree_tab_min_chars": {
+          "title": "Selected Worktree Tab Minimum Characters",
+          "description": "Minimum label characters to keep before the ellipsis for the selected worktree preview tab. Defaults to 10.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "shorten_worktree_tab_labels": {
+          "title": "Shorten Worktree Tab Labels",
+          "description": "When true, worktree tab labels use only the segment after the last slash, for example feat/yarden/potato becomes potato. Defaults to true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "worktree_tab_min_chars": {
+          "title": "Worktree Tab Minimum Characters",
+          "description": "Minimum label characters to keep before the ellipsis for non-selected worktree preview tabs. Defaults to 6.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
         }
       }
     }
