@@ -7,18 +7,18 @@ _navgator_bin() {
     return 0
   fi
 
-  if command -v navgator >/dev/null 2>&1; then
-    command -v navgator
+  if command -v navgator-navigate >/dev/null 2>&1; then
+    command -v navgator-navigate
     return 0
   fi
 
-  if [[ -x "$_NAVGATOR_SCRIPT_DIR/../target/release/navgator" ]]; then
-    echo "$_NAVGATOR_SCRIPT_DIR/../target/release/navgator"
+  if [[ -x "$_NAVGATOR_SCRIPT_DIR/../target/release/navgator-navigate" ]]; then
+    echo "$_NAVGATOR_SCRIPT_DIR/../target/release/navgator-navigate"
     return 0
   fi
 
-  if [[ -x "$_NAVGATOR_SCRIPT_DIR/../target/debug/navgator" ]]; then
-    echo "$_NAVGATOR_SCRIPT_DIR/../target/debug/navgator"
+  if [[ -x "$_NAVGATOR_SCRIPT_DIR/../target/debug/navgator-navigate" ]]; then
+    echo "$_NAVGATOR_SCRIPT_DIR/../target/debug/navgator-navigate"
     return 0
   fi
 
@@ -27,7 +27,7 @@ _navgator_bin() {
 
 navigate() {
   local bin dir tmp exit_status
-  bin="$(_navgator_bin)" || { echo "navgator binary not found" >&2; return 127; }
+  bin="$(_navgator_bin)" || { echo "navgator-navigate binary not found" >&2; return 127; }
   tmp="$(mktemp -t navgator.XXXXXX)" || return 1
   [[ -n "$ZLE" ]] && zle -I
   if command -v script >/dev/null 2>&1; then
