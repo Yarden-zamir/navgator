@@ -36,6 +36,42 @@
           "type": "null"
         }
       ]
+    },
+    "remote": {
+      "title": "Remote",
+      "description": "Remote branch discovery settings.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigRemote"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sort": {
+      "title": "Sort",
+      "description": "Result sorting settings.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigSort"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ui": {
+      "title": "UI",
+      "description": "User interface color and display settings.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigUi"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {
@@ -99,6 +135,107 @@
           ],
           "format": "uint",
           "minimum": 0.0
+        }
+      }
+    },
+    "ConfigRemote": {
+      "title": "Remote Settings",
+      "description": "Settings for remote branch discovery and caching.",
+      "type": "object",
+      "properties": {
+        "enabled_by_default": {
+          "title": "Enabled By Default",
+          "description": "When true, remote branch mode starts enabled for the initially selected project. Defaults to false.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "refresh_on_toggle": {
+          "title": "Refresh On Toggle",
+          "description": "When true, enabling remote branch mode runs a background ls-remote refresh. Defaults to true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "use_cache": {
+          "title": "Use Cache",
+          "description": "When true, cached remote branches are shown before local refs and background refresh. Defaults to true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "ConfigSort": {
+      "title": "Sort Settings",
+      "description": "Settings for result ordering.",
+      "type": "object",
+      "properties": {
+        "default": {
+          "title": "Default Sort",
+          "description": "Initial result sort mode. Defaults to modified-desc.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigSortMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin_current_project": {
+          "title": "Pin Current Project",
+          "description": "When true, the current Git worktree/project is pinned to the first row for empty searches. Defaults to true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "ConfigSortMode": {
+      "type": "string",
+      "enum": [
+        "match",
+        "alpha-asc",
+        "alpha-desc",
+        "created-asc",
+        "created-desc",
+        "modified-asc",
+        "modified-desc"
+      ]
+    },
+    "ConfigTheme": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "light",
+        "dark"
+      ]
+    },
+    "ConfigUi": {
+      "title": "UI Settings",
+      "description": "User interface color settings.",
+      "type": "object",
+      "properties": {
+        "theme": {
+          "title": "Theme",
+          "description": "Color theme to use. Defaults to auto.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }
