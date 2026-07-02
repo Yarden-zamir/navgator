@@ -1,0 +1,16 @@
+[package]
+name = "navgator"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ansi-to-tui.workspace = true
+crossterm.workspace = true
+figment.workspace = true
+gator = { path = "../gator" }
+libc.workspace = true
+ratatui.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tui-input.workspace = true
