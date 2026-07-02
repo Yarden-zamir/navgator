@@ -1,16 +1,21 @@
 [package]
 name = "navgator"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
+description = "Rust TUI project navigator with Git worktree and preview support"
+license = "MIT"
+repository = "https://github.com/Yarden-zamir/navgator"
+keywords = ["tui", "ratatui", "git", "worktree", "cli"]
+categories = ["command-line-interface", "development-tools"]
 
 [dependencies]
-ansi-to-tui.workspace = true
-crossterm.workspace = true
-figment.workspace = true
-gator = { path = "../gator" }
-libc.workspace = true
-ratatui.workspace = true
-schemars.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tui-input.workspace = true
+ansi-to-tui = "8.0"
+crossterm = "0.29"
+figment = { version = "0.10", features = ["toml"] }
+gator = { git = "https://github.com/Yarden-zamir/gator", tag = "v0.1.0" }
+libc = "0.2"
+ratatui = "0.30"
+schemars = { version = "0.8", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tui-input = { version = "0.15", features = ["crossterm"] }
