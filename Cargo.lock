@@ -711,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "navgator"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ansi-to-tui",
  "crossterm",
