@@ -10,7 +10,6 @@ use std::{
     collections::HashSet,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -388,7 +387,7 @@ fn auto_theme_colors() -> ThemeColors {
 fn os_prefers_dark_theme() -> bool {
     #[cfg(target_os = "macos")]
     {
-        Command::new("defaults")
+        std::process::Command::new("defaults")
             .arg("read")
             .arg("-g")
             .arg("AppleInterfaceStyle")
