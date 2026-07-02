@@ -14,7 +14,7 @@ pub(crate) const DEFAULT_WORKTREE_TAB_MIN_CHARS: usize = 6;
 pub(crate) const DEFAULT_SELECTED_WORKTREE_TAB_MIN_CHARS: usize = 10;
 pub(crate) const MIN_PARTIAL_TAB_WIDTH: usize = 4;
 pub(crate) const CONFIG_SCHEMA_URL: &str =
-    "https://raw.githubusercontent.com/Yarden-zamir/Navgator/main/config-schema.json";
+    "https://raw.githubusercontent.com/Yarden-zamir/navgator/main/config-schema.json";
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ProviderId(pub(crate) String);
