@@ -154,6 +154,7 @@ fn select_from_list(
     let (mut terminal, _guard) = setup_terminal()?;
     let mut input = Input::default();
     let mut selected = 0usize;
+    let mut stick_to_first_result = true;
     let mut sort_mode = sort_settings.default_mode;
     let mut focus = Focus::Search;
     let mut meta_cache: HashMap<String, SortMeta> = HashMap::new();
@@ -322,10 +323,13 @@ fn select_from_list(
                     current_project_path.as_deref(),
                 ),
             );
-            selected = selected_id
-                .as_deref()
-                .and_then(|id| index_for_entry_id(&entries, &filtered, id))
-                .unwrap_or_else(|| adjust_selected_index(selected, filtered.len()));
+            selected = selected_after_refilter(
+                &entries,
+                &filtered,
+                selected,
+                selected_id.as_deref(),
+                stick_to_first_result,
+            );
         }
 
         while let Ok(result) = preview_rx.try_recv() {
@@ -446,10 +450,13 @@ fn select_from_list(
                     current_project_path.as_deref(),
                 ),
             );
-            selected = match selected_id {
-                Some(id) => index_for_entry_id(&entries, &filtered, &id).unwrap_or(0),
-                None => adjust_selected_index(selected, filtered.len()),
-            };
+            selected = selected_after_refilter(
+                &entries,
+                &filtered,
+                selected,
+                selected_id.as_deref(),
+                stick_to_first_result,
+            );
         }
 
         if tags_changed && query_uses_tags {
@@ -467,10 +474,13 @@ fn select_from_list(
                     current_project_path.as_deref(),
                 ),
             );
-            selected = match selected_id {
-                Some(id) => index_for_entry_id(&entries, &filtered, &id).unwrap_or(0),
-                None => adjust_selected_index(selected, filtered.len()),
-            };
+            selected = selected_after_refilter(
+                &entries,
+                &filtered,
+                selected,
+                selected_id.as_deref(),
+                stick_to_first_result,
+            );
         }
 
         match current.as_deref() {
@@ -835,6 +845,7 @@ fn select_from_list(
                     if key.code == KeyCode::Char('y')
                         && key.modifiers.contains(KeyModifiers::CONTROL)
                     {
+                        stick_to_first_result = false;
                         if let Some(value) = selection_path_for_action(
                             focus,
                             current.as_deref(),
@@ -858,6 +869,7 @@ fn select_from_list(
                         else {
                             continue;
                         };
+                        stick_to_first_result = false;
                         worktree_overlay = Some(WorktreeOverlay::new(
                             delete_worktree_overlay_title(&entry),
                             "Starting safety checks",
@@ -869,6 +881,7 @@ fn select_from_list(
                         && key.modifiers.contains(KeyModifiers::CONTROL)
                         && focus != Focus::TagEdit
                     {
+                        stick_to_first_result = false;
                         let selected_id = current_selection_entry(&entries, &filtered, selected)
                             .map(|entry| entry.id.clone());
                         show_remote_branches = !show_remote_branches;
@@ -919,6 +932,7 @@ fn select_from_list(
                         && key.modifiers.contains(KeyModifiers::CONTROL)
                         && focus != Focus::TagEdit
                     {
+                        stick_to_first_result = false;
                         if let Some(path) = current_selection_entry(&entries, &filtered, selected)
                             .map(|entry| entry.metadata_path.clone())
                         {
@@ -932,6 +946,7 @@ fn select_from_list(
                         continue;
                     }
                     if key.code == KeyCode::Enter && focus != Focus::TagEdit {
+                        stick_to_first_result = false;
                         if let Some(entry) = current_selection_entry(&entries, &filtered, selected)
                             .filter(|entry| is_remote_branch_entry(entry))
                             .cloned()
@@ -972,6 +987,7 @@ fn select_from_list(
                             ),
                         );
                         selected = 0;
+                        stick_to_first_result = true;
                         list_offset = 0;
                         if sort_mode.uses_time() {
                             let paths = all_metadata_paths(&entries);
@@ -993,11 +1009,16 @@ fn select_from_list(
                     match focus {
                         Focus::Search => match key.code {
                             KeyCode::Up => {
-                                selected = selected.saturating_sub(1);
+                                let next = selected.saturating_sub(1);
+                                if next != selected {
+                                    stick_to_first_result = false;
+                                }
+                                selected = next;
                             }
                             KeyCode::Down => {
                                 if selected + 1 < filtered.len() {
                                     selected += 1;
+                                    stick_to_first_result = false;
                                 }
                             }
                             KeyCode::Right
@@ -1005,6 +1026,7 @@ fn select_from_list(
                                     KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
                                 ) && input_at_end(&input) =>
                             {
+                                stick_to_first_result = false;
                                 focus = Focus::Preview;
                             }
                             _ => {
@@ -1036,6 +1058,7 @@ fn select_from_list(
                                         ),
                                     );
                                     selected = 0;
+                                    stick_to_first_result = true;
                                     list_offset = 0;
                                 }
                             }
@@ -1124,6 +1147,7 @@ fn select_from_list(
                             ),
                         );
                         selected = 0;
+                        stick_to_first_result = true;
                         list_offset = 0;
                     }
                     Focus::TagEdit => {
@@ -1140,36 +1164,51 @@ fn select_from_list(
                                 focus = Focus::Search;
                             } else if let Some(detail_panel_area) = ui.detail_panel_area {
                                 if rect_contains(detail_panel_area, col, row) {
+                                    stick_to_first_result = false;
                                     focus = Focus::Detail;
                                 } else if rect_contains(ui.preview_area, col, row) {
+                                    stick_to_first_result = false;
                                     focus = Focus::Preview;
                                 }
                             } else if rect_contains(ui.preview_area, col, row) {
+                                stick_to_first_result = false;
                                 focus = Focus::Preview;
                             }
                         }
                         MouseEventKind::ScrollUp => {
                             if rect_contains(ui.preview_area, col, row) {
+                                stick_to_first_result = false;
                                 compositor.scroll_preview_up();
                             } else if let Some(detail_panel_area) = ui.detail_panel_area {
                                 if rect_contains(detail_panel_area, col, row) {
+                                    stick_to_first_result = false;
                                     compositor.scroll_detail_up();
                                 }
                             } else if rect_contains(ui.results_area, col, row) {
-                                selected = selected.saturating_sub(1);
+                                let next = selected.saturating_sub(1);
+                                if next != selected {
+                                    stick_to_first_result = false;
+                                }
+                                selected = next;
                             }
                         }
                         MouseEventKind::ScrollDown => {
                             if rect_contains(ui.preview_area, col, row) {
+                                stick_to_first_result = false;
                                 compositor.scroll_preview_down();
                             } else if let Some(detail_panel_area) = ui.detail_panel_area {
                                 if rect_contains(detail_panel_area, col, row) {
+                                    stick_to_first_result = false;
                                     compositor.scroll_detail_down();
                                 }
                             } else if rect_contains(ui.results_area, col, row) {
-                                selected = selected
+                                let next = selected
                                     .saturating_add(1)
                                     .min(filtered.len().saturating_sub(1));
+                                if next != selected {
+                                    stick_to_first_result = false;
+                                }
+                                selected = next;
                             }
                         }
                         _ => {}
@@ -1190,6 +1229,22 @@ fn adjust_selected_index(current: usize, len: usize) -> usize {
     } else {
         current
     }
+}
+
+fn selected_after_refilter(
+    entries: &[NavigateEntry],
+    filtered: &[usize],
+    current: usize,
+    selected_id: Option<&str>,
+    stick_to_first_result: bool,
+) -> usize {
+    if stick_to_first_result {
+        return adjust_selected_index(0, filtered.len());
+    }
+
+    selected_id
+        .and_then(|id| index_for_entry_id(entries, filtered, id))
+        .unwrap_or_else(|| adjust_selected_index(current, filtered.len()))
 }
 
 fn insert_paste(input: &mut Input, value: &str) {
@@ -1948,6 +2003,34 @@ mod tests {
 
         assert_eq!(compositor.active_content_index(), 1);
         assert_eq!(compositor.preview_tab_visible_index, 1);
+    }
+
+    #[test]
+    fn unclaimed_selection_follows_first_result_after_refilter() {
+        let entries = vec![
+            test_entry("recycle", "$RECYCLE.BIN", "/repos/$RECYCLE.BIN"),
+            test_entry("project", "project", "/repos/project"),
+        ];
+        let filtered = vec![1, 0];
+
+        let selected = selected_after_refilter(&entries, &filtered, 0, Some("recycle"), true);
+
+        assert_eq!(selected, 0);
+        assert_eq!(entries[filtered[selected]].id, "project");
+    }
+
+    #[test]
+    fn user_controlled_selection_is_preserved_after_refilter() {
+        let entries = vec![
+            test_entry("recycle", "$RECYCLE.BIN", "/repos/$RECYCLE.BIN"),
+            test_entry("project", "project", "/repos/project"),
+        ];
+        let filtered = vec![1, 0];
+
+        let selected = selected_after_refilter(&entries, &filtered, 0, Some("recycle"), false);
+
+        assert_eq!(selected, 1);
+        assert_eq!(entries[filtered[selected]].id, "recycle");
     }
 
     fn test_entry(id: &str, display: &str, path: &str) -> model::NavigateEntry {

@@ -332,16 +332,12 @@ fn compare_time(
 
     let left_value = value(left_path);
     let right_value = value(right_path);
-    let ordering = match (left_value, right_value) {
+    match (left_value, right_value) {
+        (Some(left), Some(right)) if descending => right.cmp(&left),
         (Some(left), Some(right)) => left.cmp(&right),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
-    };
-    if descending {
-        ordering.reverse()
-    } else {
-        ordering
     }
 }
 
@@ -404,7 +400,7 @@ fn char_index_from_byte(text: &str, byte_index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::filter_and_sort;
-    use crate::model::{NavigateEntry, NavigateEntryKind, SortMode};
+    use crate::model::{NavigateEntry, NavigateEntryKind, SortMeta, SortMode};
     use std::collections::HashMap;
 
     #[test]
@@ -440,5 +436,53 @@ mod tests {
             ),
             vec![0]
         );
+    }
+
+    #[test]
+    fn modified_desc_keeps_unknown_metadata_after_known_paths() {
+        let entries = vec![
+            test_entry("recycle", "$RECYCLE.BIN", "/repos/$RECYCLE.BIN"),
+            test_entry("project", "project", "/repos/project"),
+        ];
+        let mut meta_cache = HashMap::new();
+        meta_cache.insert(
+            "/repos/project".to_string(),
+            SortMeta {
+                modified_epoch: Some(200),
+                created_epoch: Some(100),
+            },
+        );
+        meta_cache.insert(
+            "/repos/$RECYCLE.BIN".to_string(),
+            SortMeta {
+                modified_epoch: None,
+                created_epoch: None,
+            },
+        );
+
+        assert_eq!(
+            filter_and_sort(
+                &entries,
+                "",
+                SortMode::ModifiedDesc,
+                &meta_cache,
+                &HashMap::new()
+            ),
+            vec![1, 0]
+        );
+    }
+
+    fn test_entry(id: &str, display: &str, path: &str) -> NavigateEntry {
+        NavigateEntry {
+            id: id.to_string(),
+            display: display.to_string(),
+            context: None,
+            preview_root_path: path.to_string(),
+            preferred_preview_path: None,
+            selection_path: path.to_string(),
+            metadata_path: path.to_string(),
+            search_text: vec![display.to_string()],
+            kind: NavigateEntryKind::Project,
+        }
     }
 }
