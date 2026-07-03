@@ -4,6 +4,8 @@ Rust TUI project navigator with Git worktree and preview support.
 
 ## Install
 
+Homebrew tap: https://github.com/Yarden-zamir/homebrew-tap
+
 ```sh
 brew install yarden-zamir/tap/navgator
 ```
