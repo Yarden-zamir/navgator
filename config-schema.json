@@ -13,6 +13,18 @@
         "null"
       ]
     },
+    "actions": {
+      "title": "Actions",
+      "description": "Ctrl+Enter action picker settings.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigActions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "paths": {
       "title": "Paths",
       "description": "Path collection settings used to build the navigation list.",
@@ -75,6 +87,122 @@
     }
   },
   "definitions": {
+    "ConfigAction": {
+      "title": "Action",
+      "description": "One action picker item.",
+      "type": "object",
+      "oneOf": [
+        {
+          "description": "Return the selected path to the shell wrapper.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "navigate"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Run a command and close navgator.",
+          "type": "object",
+          "required": [
+            "command",
+            "type"
+          ],
+          "properties": {
+            "args": {
+              "title": "Arguments",
+              "description": "Command arguments.",
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "command": {
+              "title": "Command",
+              "description": "Executable name or absolute path.",
+              "type": "string"
+            },
+            "current_dir": {
+              "title": "Current Directory",
+              "description": "Optional command working directory.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "command"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Open a URL and close navgator.",
+          "type": "object",
+          "required": [
+            "type",
+            "url"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "open-url"
+              ]
+            },
+            "url": {
+              "title": "URL",
+              "description": "URL to open.",
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "title": "Label",
+          "description": "Text shown in the action picker.",
+          "type": "string"
+        }
+      }
+    },
+    "ConfigActions": {
+      "title": "Action Settings",
+      "description": "Actions shown by the Ctrl+Enter picker. Set defaults = false to replace the built-in actions. Use {path} for the selected path and {github_url} for the selected repo's GitHub URL.",
+      "type": "object",
+      "properties": {
+        "defaults": {
+          "title": "Include Default Actions",
+          "description": "When true, built-in actions are included before custom items. Defaults to true.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "items": {
+          "title": "Items",
+          "description": "Custom actions appended to the picker.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConfigAction"
+          }
+        }
+      }
+    },
     "ConfigPaths": {
       "title": "Path Settings",
       "description": "Groups of folders that navgator indexes or always includes.",

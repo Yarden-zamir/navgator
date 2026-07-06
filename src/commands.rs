@@ -58,3 +58,43 @@ pub(crate) fn git_command_succeeds(repo_dir: &Path, args: &[&str]) -> bool {
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
+
+pub(crate) fn run_interactive_command(
+    program: &str,
+    args: &[String],
+    current_dir: Option<&Path>,
+) -> Result<(), String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    if let Some(dir) = current_dir {
+        cmd.current_dir(dir);
+    }
+    let status = cmd
+        .status()
+        .map_err(|err| format!("failed to run {program}: {err}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{program} exited with {status}"))
+    }
+}
+
+pub(crate) fn open_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let args = vec![url.to_string()];
+        run_interactive_command("open", &args, None)
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let args = vec!["/C".to_string(), "start".to_string(), url.to_string()];
+        run_interactive_command("cmd", &args, None)
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let args = vec![url.to_string()];
+        run_interactive_command("xdg-open", &args, None)
+    }
+}

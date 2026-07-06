@@ -3,12 +3,12 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Clear, List, ListState, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use std::{
     collections::{HashMap, HashSet},
     env,
-    path::Path,
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -40,10 +40,11 @@ use gator::{copy_to_clipboard, ensure_tty_stdin, input_at_end, setup_terminal, w
 use github::ensure_github_readme_for_preview;
 use metadata::{ensure_dates_for_paths, spawn_bulk_metadata_fetch};
 use model::{
-    AppResult, Focus, GitResult, GithubReadmeResult, HelpColors, HelpContext, MetaResult,
-    NavigateEntry, NavigateEntryKind, PreviewColors, PreviewData, PreviewResult, PreviewSettings,
-    RemoteSettings, RemoteToggleState, ResultUpdate, SidePanelRender, SortMeta, SortMode,
-    SortSettings, TagResult, ThemeColors, VisibleListArgs, DATE_PLACEHOLDER,
+    ActionDefinition, ActionKind, ActionSettings, AppResult, Focus, GitResult, GithubReadmeResult,
+    HelpColors, HelpContext, MetaResult, NavigateEntry, NavigateEntryKind, PreviewColors,
+    PreviewData, PreviewResult, PreviewSettings, RemoteSettings, RemoteToggleState, ResultUpdate,
+    SidePanelRender, SortMeta, SortMode, SortSettings, TagResult, ThemeColors, VisibleListArgs,
+    DATE_PLACEHOLDER,
 };
 use results::{
     build_items, spawn_remote_branch_result_provider, spawn_worktree_result_provider,
@@ -132,10 +133,133 @@ fn run_navigate() -> AppResult<()> {
         result.preview_settings,
         result.sort_settings,
         result.remote_settings,
+        result.action_settings,
         result.theme_colors,
     )? {
-        Some(choice) => write_selection(&choice),
+        Some(NavigateOutcome::Navigate(choice)) => write_selection(&choice),
+        Some(NavigateOutcome::RunAction(action)) => run_action(action).map_err(Into::into),
         None => std::process::exit(1),
+    }
+}
+
+enum NavigateOutcome {
+    Navigate(String),
+    RunAction(ResolvedAction),
+}
+
+enum ResolvedAction {
+    Command {
+        command: String,
+        args: Vec<String>,
+        current_dir: Option<PathBuf>,
+    },
+    OpenUrl(String),
+}
+
+struct ActionPicker {
+    selected: usize,
+}
+
+struct ActionPickerColors {
+    accent: Color,
+    warm: Color,
+    text: Color,
+    muted: Color,
+}
+
+fn run_action(action: ResolvedAction) -> Result<(), String> {
+    match action {
+        ResolvedAction::Command {
+            command,
+            args,
+            current_dir,
+        } => commands::run_interactive_command(&command, &args, current_dir.as_deref()),
+        ResolvedAction::OpenUrl(url) => commands::open_url(&url),
+    }
+}
+
+fn resolve_picker_action(
+    action: Option<&ActionDefinition>,
+    path: Option<&str>,
+) -> Option<NavigateOutcome> {
+    let action = action?;
+    match &action.kind {
+        ActionKind::Navigate => path.map(|value| NavigateOutcome::Navigate(value.to_string())),
+        ActionKind::Command {
+            command,
+            args,
+            current_dir,
+        } => {
+            let github_url = github_url_for_action(path);
+            let command = expand_action_value(command, path, github_url.as_deref())?;
+            let args = args
+                .iter()
+                .map(|arg| expand_action_value(arg, path, github_url.as_deref()))
+                .collect::<Option<Vec<String>>>()?;
+            let current_dir_value = current_dir
+                .as_ref()
+                .map(|dir| expand_action_value(dir, path, github_url.as_deref()))
+                .unwrap_or(Some(String::new()))?;
+            let current_dir = if current_dir_value.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(current_dir_value))
+            };
+            Some(NavigateOutcome::RunAction(ResolvedAction::Command {
+                command,
+                args,
+                current_dir,
+            }))
+        }
+        ActionKind::OpenUrl { url } => {
+            let github_url = github_url_for_action(path);
+            let url = expand_action_value(url, path, github_url.as_deref())?;
+            Some(NavigateOutcome::RunAction(ResolvedAction::OpenUrl(url)))
+        }
+    }
+}
+
+fn github_url_for_action(path: Option<&str>) -> Option<String> {
+    github::github_url_for_path(Path::new(path?))
+}
+
+fn expand_action_value(
+    value: &str,
+    path: Option<&str>,
+    github_url: Option<&str>,
+) -> Option<String> {
+    if value.contains("{path}") && path.is_none() {
+        return None;
+    }
+    if value.contains("{github_url}") && github_url.is_none() {
+        return None;
+    }
+
+    let mut expanded = value.to_string();
+    if let Some(path) = path {
+        expanded = expanded.replace("{path}", path);
+    }
+    if let Some(github_url) = github_url {
+        expanded = expanded.replace("{github_url}", github_url);
+    }
+    Some(expanded)
+}
+
+fn next_picker_index(selected: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        (selected + 1) % len
+    }
+}
+
+fn previous_picker_index(selected: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else if selected == 0 {
+        len - 1
+    } else {
+        selected - 1
     }
 }
 
@@ -145,8 +269,9 @@ fn select_from_list(
     preview_settings: PreviewSettings,
     sort_settings: SortSettings,
     remote_settings: RemoteSettings,
+    action_settings: ActionSettings,
     theme_colors: ThemeColors,
-) -> AppResult<Option<String>> {
+) -> AppResult<Option<NavigateOutcome>> {
     if entries.is_empty() {
         return Ok(None);
     }
@@ -215,6 +340,7 @@ fn select_from_list(
     let mut tag_input = Input::default();
     let mut tag_suggestions: Vec<String> = Vec::new();
     let mut worktree_overlay: Option<WorktreeOverlay> = None;
+    let mut action_picker: Option<ActionPicker> = None;
     spawn_worktree_result_provider(&entries, result_tx.clone());
     if show_remote_branches {
         if let Some(entry) = filtered
@@ -248,7 +374,7 @@ fn select_from_list(
                 }
                 WorktreeProgress::Select(path) => {
                     terminal.show_cursor()?;
-                    return Ok(Some(path));
+                    return Ok(Some(NavigateOutcome::Navigate(path)));
                 }
                 WorktreeProgress::Deleted(path) => {
                     entries.retain(|entry| entry.selection_path != path);
@@ -808,11 +934,75 @@ fn select_from_list(
             if let Some(overlay) = worktree_overlay.as_ref() {
                 render_worktree_overlay(frame, size.into(), overlay, accent, warm, text, muted);
             }
+            if let Some(picker) = action_picker.as_ref() {
+                render_action_picker(
+                    frame,
+                    size.into(),
+                    &action_settings.items,
+                    picker.selected,
+                    ActionPickerColors {
+                        accent,
+                        warm,
+                        text,
+                        muted,
+                    },
+                );
+            }
         })?;
 
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) => {
+                    if action_picker.is_some() {
+                        if key.code == KeyCode::Esc
+                            || (key.code == KeyCode::Char('c')
+                                && key.modifiers.contains(KeyModifiers::CONTROL))
+                        {
+                            action_picker = None;
+                            continue;
+                        }
+                        match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if let Some(picker) = action_picker.as_mut() {
+                                    picker.selected = previous_picker_index(
+                                        picker.selected,
+                                        action_settings.items.len(),
+                                    );
+                                }
+                                continue;
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                if let Some(picker) = action_picker.as_mut() {
+                                    picker.selected = next_picker_index(
+                                        picker.selected,
+                                        action_settings.items.len(),
+                                    );
+                                }
+                                continue;
+                            }
+                            KeyCode::Enter => {
+                                let Some(picker) = action_picker.as_ref() else {
+                                    continue;
+                                };
+                                let action = action_settings.items.get(picker.selected);
+                                let path = selection_path_for_action(
+                                    focus,
+                                    current.as_deref(),
+                                    compositor.active_content_index(),
+                                    &preview_cache,
+                                    current_selection_entry(&entries, &filtered, selected),
+                                );
+                                if let Some(outcome) =
+                                    resolve_picker_action(action, path.as_deref())
+                                {
+                                    terminal.show_cursor()?;
+                                    return Ok(Some(outcome));
+                                }
+                                continue;
+                            }
+                            _ => continue,
+                        }
+                    }
                     if key.code == KeyCode::Esc {
                         if worktree_overlay.is_some() {
                             if worktree_overlay
@@ -839,6 +1029,16 @@ fn select_from_list(
                                 .is_some_and(WorktreeOverlay::is_error)
                         {
                             worktree_overlay = None;
+                        }
+                        continue;
+                    }
+                    if key.code == KeyCode::Enter
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                        && focus != Focus::TagEdit
+                    {
+                        if !action_settings.items.is_empty() {
+                            stick_to_first_result = false;
+                            action_picker = Some(ActionPicker { selected: 0 });
                         }
                         continue;
                     }
@@ -967,7 +1167,7 @@ fn select_from_list(
                         );
                         if let Some(value) = value {
                             terminal.show_cursor()?;
-                            return Ok(Some(value));
+                            return Ok(Some(NavigateOutcome::Navigate(value)));
                         }
                     }
                     if key.code == KeyCode::Char('s')
@@ -1503,6 +1703,103 @@ fn render_worktree_overlay(
     frame.render_widget(messages, messages_area);
 }
 
+fn render_action_picker(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    actions: &[ActionDefinition],
+    selected: usize,
+    colors: ActionPickerColors,
+) {
+    let content_width = actions
+        .iter()
+        .map(|action| action.label.chars().count() as u16)
+        .max()
+        .unwrap_or(24)
+        .saturating_add(10);
+    let width = content_width.clamp(36, 72).min(area.width);
+    let height = (actions.len() as u16)
+        .saturating_add(4)
+        .clamp(8, 18)
+        .min(area.height);
+    let popup = centered_rect(area, width, height);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Actions")
+        .border_style(Style::default().fg(colors.accent))
+        .border_type(BorderType::Rounded);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let footer_height = 1.min(inner.height);
+    let list_height = inner.height.saturating_sub(footer_height);
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: list_height,
+    };
+    let footer_area = Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(list_height),
+        width: inner.width,
+        height: footer_height,
+    };
+
+    let selected = selected.min(actions.len().saturating_sub(1));
+    let offset = if selected >= list_height as usize {
+        selected + 1 - list_height as usize
+    } else {
+        0
+    };
+    let items = actions
+        .iter()
+        .skip(offset)
+        .take(list_height as usize)
+        .enumerate()
+        .map(|(visible_index, action)| {
+            let action_index = offset + visible_index;
+            let prefix = if action_index == selected {
+                "› "
+            } else {
+                "  "
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(colors.warm)),
+                Span::styled(action.label.clone(), Style::default().fg(colors.text)),
+            ]))
+        })
+        .collect::<Vec<ListItem>>();
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(colors.warm)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    state.select(selected.checked_sub(offset));
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" run  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" close", Style::default().fg(colors.muted)),
+    ]));
+    frame.render_widget(footer, footer_area);
+}
+
 fn render_progress_bar(progress: f64, width: usize, fill: Color, empty: Color) -> Line<'static> {
     let bar_width = width.saturating_sub(6).clamp(8, 72);
     let filled = ((bar_width as f64) * progress).round() as usize;
@@ -1824,6 +2121,58 @@ mod tests {
             .as_deref(),
             Some("/repos/project.git")
         );
+    }
+
+    #[test]
+    fn default_actions_include_requested_tools() {
+        let actions = model::default_action_definitions();
+        let labels = actions
+            .iter()
+            .map(|action| action.label.as_str())
+            .collect::<Vec<&str>>();
+
+        assert_eq!(labels[0], "Navigate to");
+        assert!(labels.contains(&"Open GitHub Desktop"));
+        assert!(labels.contains(&"Open VS Code"));
+        assert!(labels.contains(&"Open IntelliJ"));
+        assert!(labels.contains(&"Open repo online"));
+        assert!(labels.contains(&"Open Claude session"));
+        assert!(labels.contains(&"Open OpenCode session"));
+    }
+
+    #[test]
+    fn default_intellij_action_runs_idea_dot_in_selected_path() {
+        let actions = model::default_action_definitions();
+        let action = actions
+            .iter()
+            .find(|action| action.label == "Open IntelliJ")
+            .expect("default IntelliJ action");
+
+        assert!(matches!(
+            &action.kind,
+            ActionKind::Command {
+                command,
+                args,
+                current_dir: Some(current_dir),
+            } if command == "idea" && args == &["."] && current_dir == "{path}"
+        ));
+    }
+
+    #[test]
+    fn expands_action_path_placeholders() {
+        assert_eq!(
+            expand_action_value("cd {path}", Some("/repos/project"), None),
+            Some("cd /repos/project".to_string())
+        );
+        assert_eq!(expand_action_value("cd {path}", None, None), None);
+    }
+
+    #[test]
+    fn picker_index_wraps() {
+        assert_eq!(next_picker_index(2, 3), 0);
+        assert_eq!(previous_picker_index(0, 3), 2);
+        assert_eq!(next_picker_index(0, 0), 0);
+        assert_eq!(previous_picker_index(0, 0), 0);
     }
 
     #[test]

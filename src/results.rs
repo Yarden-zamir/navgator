@@ -77,6 +77,7 @@ pub(crate) fn build_items() -> AppResult<BuildItemsResult> {
         preview_settings: config.preview_settings,
         sort_settings: config.sort_settings,
         remote_settings: config.remote_settings,
+        action_settings: config.action_settings,
         theme_colors: config.theme_colors,
     })
 }

@@ -291,6 +291,16 @@ pub(crate) fn github_repo_from_remote(remote: &str) -> Option<String> {
     github_repo_from_path(path)
 }
 
+pub(crate) fn github_url_from_remote(remote: &str) -> Option<String> {
+    github_repo_from_remote(remote).map(|repo| format!("https://github.com/{repo}"))
+}
+
+pub(crate) fn github_url_for_path(path: &Path) -> Option<String> {
+    let repo_dir = git_command_dir_for_path(path)?;
+    let remote = run_git_command_allow_empty(&repo_dir, &["remote", "get-url", "origin"])?;
+    github_url_from_remote(&remote)
+}
+
 fn github_repo_from_path(path: &str) -> Option<String> {
     let without_query = path.split('?').next().unwrap_or(path);
     let without_fragment = without_query.split('#').next().unwrap_or(without_query);
@@ -309,7 +319,10 @@ fn github_repo_from_path(path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{github_repo_from_remote, github_summary_from_json, GithubRepoSummary};
+    use super::{
+        github_repo_from_remote, github_summary_from_json, github_url_from_remote,
+        GithubRepoSummary,
+    };
 
     #[test]
     fn parses_https_github_remote() {
@@ -332,6 +345,14 @@ mod tests {
         assert_eq!(
             github_repo_from_remote("ssh://git@github.com/Yarden-zamir/navgator.git"),
             Some("Yarden-zamir/navgator".to_string())
+        );
+    }
+
+    #[test]
+    fn builds_github_url_from_remote() {
+        assert_eq!(
+            github_url_from_remote("git@github.com:Yarden-zamir/navgator.git"),
+            Some("https://github.com/Yarden-zamir/navgator".to_string())
         );
     }
 

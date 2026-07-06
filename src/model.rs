@@ -187,6 +187,7 @@ pub(crate) struct BuildItemsResult {
     pub(crate) preview_settings: PreviewSettings,
     pub(crate) sort_settings: SortSettings,
     pub(crate) remote_settings: RemoteSettings,
+    pub(crate) action_settings: ActionSettings,
     pub(crate) theme_colors: ThemeColors,
 }
 
@@ -210,7 +211,103 @@ pub(crate) struct LoadedConfig {
     pub(crate) preview_settings: PreviewSettings,
     pub(crate) sort_settings: SortSettings,
     pub(crate) remote_settings: RemoteSettings,
+    pub(crate) action_settings: ActionSettings,
     pub(crate) theme_colors: ThemeColors,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActionSettings {
+    pub(crate) items: Vec<ActionDefinition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActionDefinition {
+    pub(crate) label: String,
+    pub(crate) kind: ActionKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ActionKind {
+    Navigate,
+    Command {
+        command: String,
+        args: Vec<String>,
+        current_dir: Option<String>,
+    },
+    OpenUrl {
+        url: String,
+    },
+}
+
+impl Default for ActionSettings {
+    fn default() -> Self {
+        Self {
+            items: default_action_definitions(),
+        }
+    }
+}
+
+pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
+    vec![
+        ActionDefinition {
+            label: "Navigate to".to_string(),
+            kind: ActionKind::Navigate,
+        },
+        ActionDefinition {
+            label: "Open GitHub Desktop".to_string(),
+            kind: ActionKind::Command {
+                command: "open".to_string(),
+                args: vec![
+                    "-a".to_string(),
+                    "GitHub Desktop".to_string(),
+                    "{path}".to_string(),
+                ],
+                current_dir: None,
+            },
+        },
+        ActionDefinition {
+            label: "Open VS Code".to_string(),
+            kind: ActionKind::Command {
+                command: "open".to_string(),
+                args: vec![
+                    "-a".to_string(),
+                    "Visual Studio Code".to_string(),
+                    "{path}".to_string(),
+                ],
+                current_dir: None,
+            },
+        },
+        ActionDefinition {
+            label: "Open IntelliJ".to_string(),
+            kind: ActionKind::Command {
+                command: "idea".to_string(),
+                args: vec![".".to_string()],
+                current_dir: Some("{path}".to_string()),
+            },
+        },
+        ActionDefinition {
+            label: "Open repo online".to_string(),
+            kind: ActionKind::OpenUrl {
+                url: "{github_url}".to_string(),
+            },
+        },
+        ActionDefinition {
+            label: "Open Claude session".to_string(),
+            kind: ActionKind::Command {
+                command: "claude".to_string(),
+                args: Vec::new(),
+                current_dir: Some("{path}".to_string()),
+            },
+        },
+        ActionDefinition {
+            label: "Open OpenCode session".to_string(),
+            kind: ActionKind::Command {
+                command: "opencode".to_string(),
+                args: Vec::new(),
+                current_dir: Some("{path}".to_string()),
+            },
+        },
+    ]
 }
 
 #[derive(Clone, Copy)]

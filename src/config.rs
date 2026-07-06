@@ -1,6 +1,7 @@
 use crate::model::{
-    default_preview_settings, AppResult, LoadedConfig, RemoteSettings, SortMode, SortSettings,
-    ThemeColors, CONFIG_SCHEMA_URL,
+    default_action_definitions, default_preview_settings, ActionDefinition, ActionKind,
+    ActionSettings, AppResult, LoadedConfig, PreviewSettings, RemoteSettings, SortMode,
+    SortSettings, ThemeColors, CONFIG_SCHEMA_URL,
 };
 use figment::providers::{Format, Toml};
 use figment::Figment;
@@ -40,11 +41,63 @@ struct ConfigFile {
     #[schemars(title = "Remote", description = "Remote branch discovery settings.")]
     remote: Option<ConfigRemote>,
     #[serde(default)]
+    #[schemars(title = "Actions", description = "Ctrl+Enter action picker settings.")]
+    actions: Option<ConfigActions>,
+    #[serde(default)]
     #[schemars(
         title = "UI",
         description = "User interface color and display settings."
     )]
     ui: Option<ConfigUi>,
+}
+
+#[derive(Clone, Copy)]
+struct ConfigRuntimeDefaults {
+    preview_settings: PreviewSettings,
+    sort_settings: SortSettings,
+    remote_settings: RemoteSettings,
+    theme_colors: ThemeColors,
+}
+
+struct ConfigLoadState {
+    index_folders: Vec<PathBuf>,
+    static_items: Vec<PathBuf>,
+    seen_index: HashSet<String>,
+    seen_static: HashSet<String>,
+    preview_settings: PreviewSettings,
+    sort_settings: SortSettings,
+    remote_settings: RemoteSettings,
+    action_settings: ActionSettings,
+    theme_colors: ThemeColors,
+}
+
+impl ConfigLoadState {
+    fn new() -> Self {
+        let defaults = config_runtime_defaults();
+        Self {
+            index_folders: Vec::new(),
+            static_items: Vec::new(),
+            seen_index: HashSet::new(),
+            seen_static: HashSet::new(),
+            preview_settings: defaults.preview_settings,
+            sort_settings: defaults.sort_settings,
+            remote_settings: defaults.remote_settings,
+            action_settings: ActionSettings::default(),
+            theme_colors: defaults.theme_colors,
+        }
+    }
+
+    fn into_loaded_config(self) -> LoadedConfig {
+        LoadedConfig {
+            index_folders: self.index_folders,
+            static_items: self.static_items,
+            preview_settings: self.preview_settings,
+            sort_settings: self.sort_settings,
+            remote_settings: self.remote_settings,
+            action_settings: self.action_settings,
+            theme_colors: self.theme_colors,
+        }
+    }
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -163,6 +216,101 @@ struct ConfigRemote {
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
+#[schemars(
+    title = "Action Settings",
+    description = "Actions shown by the Ctrl+Enter picker. Set defaults = false to replace the built-in actions. Use {path} for the selected path and {github_url} for the selected repo's GitHub URL."
+)]
+struct ConfigActions {
+    #[serde(default)]
+    #[schemars(
+        title = "Include Default Actions",
+        description = "When true, built-in actions are included before custom items. Defaults to true."
+    )]
+    defaults: Option<bool>,
+    #[serde(default)]
+    #[schemars(
+        title = "Items",
+        description = "Custom actions appended to the picker."
+    )]
+    items: Vec<ConfigAction>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[schemars(title = "Action", description = "One action picker item.")]
+struct ConfigAction {
+    #[schemars(title = "Label", description = "Text shown in the action picker.")]
+    label: String,
+    #[serde(flatten)]
+    kind: ConfigActionKind,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum ConfigActionKind {
+    #[schemars(description = "Return the selected path to the shell wrapper.")]
+    Navigate,
+    #[schemars(description = "Run a command and close navgator.")]
+    Command {
+        #[schemars(title = "Command", description = "Executable name or absolute path.")]
+        command: String,
+        #[serde(default)]
+        #[schemars(title = "Arguments", description = "Command arguments.")]
+        args: Vec<String>,
+        #[serde(default)]
+        #[schemars(
+            title = "Current Directory",
+            description = "Optional command working directory."
+        )]
+        current_dir: Option<String>,
+    },
+    #[schemars(description = "Open a URL and close navgator.")]
+    OpenUrl {
+        #[schemars(title = "URL", description = "URL to open.")]
+        url: String,
+    },
+}
+
+impl ConfigAction {
+    fn into_action_definition(self) -> Option<ActionDefinition> {
+        let label = self.label.trim();
+        if label.is_empty() {
+            return None;
+        }
+        let kind = match self.kind {
+            ConfigActionKind::Navigate => ActionKind::Navigate,
+            ConfigActionKind::Command {
+                command,
+                args,
+                current_dir,
+            } => {
+                let command = command.trim();
+                if command.is_empty() {
+                    return None;
+                }
+                ActionKind::Command {
+                    command: command.to_string(),
+                    args,
+                    current_dir,
+                }
+            }
+            ConfigActionKind::OpenUrl { url } => {
+                let url = url.trim();
+                if url.is_empty() {
+                    return None;
+                }
+                ActionKind::OpenUrl {
+                    url: url.to_string(),
+                }
+            }
+        };
+        Some(ActionDefinition {
+            label: label.to_string(),
+            kind,
+        })
+    }
+}
+
+#[derive(Default, Deserialize, JsonSchema)]
 #[schemars(title = "UI Settings", description = "User interface color settings.")]
 struct ConfigUi {
     #[serde(default)]
@@ -196,14 +344,7 @@ pub(crate) fn config_schema_json() -> AppResult<String> {
 
 pub(crate) fn load_config() -> AppResult<LoadedConfig> {
     let home = home_dir()?;
-    let mut index_folders = Vec::new();
-    let mut static_items = Vec::new();
-    let mut seen_index = HashSet::new();
-    let mut seen_static = HashSet::new();
-    let mut preview_settings = default_preview_settings();
-    let mut sort_settings = SortSettings::default();
-    let mut remote_settings = RemoteSettings::default();
-    let mut theme_colors = auto_theme_colors();
+    let mut state = ConfigLoadState::new();
     let mut found_config = false;
 
     for path in config_paths(&home) {
@@ -217,57 +358,7 @@ pub(crate) fn load_config() -> AppResult<LoadedConfig> {
             format!("Failed to parse config {}: {}", display_path, err)
         })?;
         ensure_schema_link_in_config_file(&path, &config);
-        if let Some(paths) = config.paths {
-            merge_paths(
-                &paths.index_folders,
-                base_dir,
-                &home,
-                &mut index_folders,
-                &mut seen_index,
-            );
-            merge_paths(
-                &paths.static_items,
-                base_dir,
-                &home,
-                &mut static_items,
-                &mut seen_static,
-            );
-        }
-        if let Some(preview) = config.preview {
-            if let Some(value) = preview.shorten_worktree_tab_labels {
-                preview_settings.shorten_worktree_tab_labels = value;
-            }
-            if let Some(value) = preview.worktree_tab_min_chars {
-                preview_settings.worktree_tab_min_chars = value.max(1);
-            }
-            if let Some(value) = preview.selected_worktree_tab_min_chars {
-                preview_settings.selected_worktree_tab_min_chars = value.max(1);
-            }
-        }
-        if let Some(sort) = config.sort {
-            if let Some(value) = sort.default {
-                sort_settings.default_mode = value.to_sort_mode();
-            }
-            if let Some(value) = sort.pin_current_project {
-                sort_settings.pin_current_project = value;
-            }
-        }
-        if let Some(remote) = config.remote {
-            if let Some(value) = remote.enabled_by_default {
-                remote_settings.enabled_by_default = value;
-            }
-            if let Some(value) = remote.refresh_on_toggle {
-                remote_settings.refresh_on_toggle = value;
-            }
-            if let Some(value) = remote.use_cache {
-                remote_settings.use_cache = value;
-            }
-        }
-        if let Some(ui) = config.ui {
-            if let Some(theme) = ui.theme {
-                theme_colors = theme.colors();
-            }
-        }
+        state.apply_config_file(config, base_dir, &home);
     }
 
     if !found_config {
@@ -275,14 +366,93 @@ pub(crate) fn load_config() -> AppResult<LoadedConfig> {
         return load_config_from_created_file(path);
     }
 
-    Ok(LoadedConfig {
-        index_folders,
-        static_items,
-        preview_settings,
-        sort_settings,
-        remote_settings,
-        theme_colors,
-    })
+    Ok(state.into_loaded_config())
+}
+
+fn config_runtime_defaults() -> ConfigRuntimeDefaults {
+    ConfigRuntimeDefaults {
+        preview_settings: default_preview_settings(),
+        sort_settings: SortSettings::default(),
+        remote_settings: RemoteSettings::default(),
+        theme_colors: auto_theme_colors(),
+    }
+}
+
+impl ConfigLoadState {
+    fn apply_config_file(&mut self, config: ConfigFile, base_dir: &Path, home: &Path) {
+        if let Some(paths) = config.paths {
+            merge_paths(
+                &paths.index_folders,
+                base_dir,
+                home,
+                &mut self.index_folders,
+                &mut self.seen_index,
+            );
+            merge_paths(
+                &paths.static_items,
+                base_dir,
+                home,
+                &mut self.static_items,
+                &mut self.seen_static,
+            );
+        }
+        if let Some(preview) = config.preview {
+            if let Some(value) = preview.shorten_worktree_tab_labels {
+                self.preview_settings.shorten_worktree_tab_labels = value;
+            }
+            if let Some(value) = preview.worktree_tab_min_chars {
+                self.preview_settings.worktree_tab_min_chars = value.max(1);
+            }
+            if let Some(value) = preview.selected_worktree_tab_min_chars {
+                self.preview_settings.selected_worktree_tab_min_chars = value.max(1);
+            }
+        }
+        if let Some(sort) = config.sort {
+            if let Some(value) = sort.default {
+                self.sort_settings.default_mode = value.to_sort_mode();
+            }
+            if let Some(value) = sort.pin_current_project {
+                self.sort_settings.pin_current_project = value;
+            }
+        }
+        if let Some(remote) = config.remote {
+            if let Some(value) = remote.enabled_by_default {
+                self.remote_settings.enabled_by_default = value;
+            }
+            if let Some(value) = remote.refresh_on_toggle {
+                self.remote_settings.refresh_on_toggle = value;
+            }
+            if let Some(value) = remote.use_cache {
+                self.remote_settings.use_cache = value;
+            }
+        }
+        if let Some(actions) = config.actions {
+            self.action_settings = action_settings_from_config(actions);
+        }
+        if let Some(ui) = config.ui {
+            if let Some(theme) = ui.theme {
+                self.theme_colors = theme.colors();
+            }
+        }
+    }
+}
+
+fn action_settings_from_config(config: ConfigActions) -> ActionSettings {
+    let mut items = if config.defaults.unwrap_or(true) {
+        default_action_definitions()
+    } else {
+        Vec::new()
+    };
+    items.extend(
+        config
+            .items
+            .into_iter()
+            .filter_map(ConfigAction::into_action_definition),
+    );
+    if items.is_empty() {
+        items = default_action_definitions();
+    }
+    ActionSettings { items }
 }
 
 pub(crate) fn home_dir() -> AppResult<PathBuf> {
@@ -291,7 +461,7 @@ pub(crate) fn home_dir() -> AppResult<PathBuf> {
 }
 
 fn ensure_schema_link_in_config_file(path: &Path, config: &ConfigFile) {
-    if config._schema_url.is_some() || config.paths.is_none() {
+    if config._schema_url.is_some() {
         return;
     }
 
@@ -337,18 +507,15 @@ fn load_config_from_created_file(_path: PathBuf) -> AppResult<LoadedConfig> {
 }
 
 fn default_config_path(home: &Path) -> PathBuf {
-    if let Ok(path) = env::var("NAVGATOR_CONFIG") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
+    if let Some(path) = env_path("NAVGATOR_CONFIG") {
+        return path;
     }
-    let xdg = env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".config"));
+    let xdg = config_home(home);
     xdg.join("navgator/config.toml")
 }
 
 fn default_config_contents() -> String {
+    let actions = default_actions_config_contents();
     format!(
         r#""$schema" = "{CONFIG_SCHEMA_URL}"
 
@@ -365,6 +532,10 @@ enabled_by_default = false
 refresh_on_toggle = true
 use_cache = true
 
+[actions]
+defaults = false
+{actions}
+
 [ui]
 theme = "auto"
 
@@ -374,6 +545,47 @@ worktree_tab_min_chars = 6
 selected_worktree_tab_min_chars = 10
 "#
     )
+}
+
+fn default_actions_config_contents() -> String {
+    let mut output = String::new();
+    for action in default_action_definitions() {
+        output.push_str("\n[[actions.items]]\n");
+        output.push_str(&format!("label = {}\n", toml_string(&action.label)));
+        match action.kind {
+            ActionKind::Navigate => {
+                output.push_str("type = \"navigate\"\n");
+            }
+            ActionKind::Command {
+                command,
+                args,
+                current_dir,
+            } => {
+                output.push_str("type = \"command\"\n");
+                output.push_str(&format!("command = {}\n", toml_string(&command)));
+                if !args.is_empty() {
+                    let args = args
+                        .iter()
+                        .map(|arg| toml_string(arg))
+                        .collect::<Vec<String>>()
+                        .join(", ");
+                    output.push_str(&format!("args = [{args}]\n"));
+                }
+                if let Some(current_dir) = current_dir {
+                    output.push_str(&format!("current_dir = {}\n", toml_string(&current_dir)));
+                }
+            }
+            ActionKind::OpenUrl { url } => {
+                output.push_str("type = \"open-url\"\n");
+                output.push_str(&format!("url = {}\n", toml_string(&url)));
+            }
+        }
+    }
+    output
+}
+
+fn toml_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn auto_theme_colors() -> ThemeColors {
@@ -408,16 +620,13 @@ fn os_prefers_dark_theme() -> bool {
 }
 
 fn config_paths(home: &Path) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(path) = env::var("NAVGATOR_CONFIG") {
-        if !path.trim().is_empty() {
-            paths.push(PathBuf::from(path));
-        }
+    if let Some(path) = env_path("NAVGATOR_CONFIG") {
+        return vec![path];
     }
+
+    let mut paths = Vec::new();
     paths.push(PathBuf::from("/etc/navgator/config.toml"));
-    let xdg = env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".config"));
+    let xdg = config_home(home);
     paths.push(xdg.join("navgator/config.toml"));
     paths.push(home.join(".config/navgator/config.toml"));
     paths.push(home.join(".navgator.toml"));
@@ -435,6 +644,18 @@ fn config_paths(home: &Path) -> Vec<PathBuf> {
         }
     }
     unique
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn config_home(home: &Path) -> PathBuf {
+    env_path("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))
 }
 
 fn merge_paths(
@@ -502,4 +723,154 @@ fn display_path_with_home(path: &str, home: &str) -> String {
     }
 
     path.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        action_settings_from_config, config_paths, default_config_contents,
+        ensure_schema_link_in_config_file, ConfigAction, ConfigActionKind, ConfigActions,
+        ConfigFile, ConfigLoadState, CONFIG_SCHEMA_URL,
+    };
+    use crate::model::{ActionKind, SortMode};
+    use figment::providers::{Format, Toml};
+    use figment::Figment;
+    use std::{env, fs, path::PathBuf, sync::Mutex};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn written_default_config_expands_default_actions() {
+        let config = default_config_contents();
+
+        assert!(config.contains("[actions]\ndefaults = false"));
+        assert!(config.contains("label = \"Navigate to\"\ntype = \"navigate\""));
+        assert!(config.contains(
+            "label = \"Open IntelliJ\"\ntype = \"command\"\ncommand = \"idea\"\nargs = [\".\"]\ncurrent_dir = \"{path}\""
+        ));
+        assert!(config
+            .contains("label = \"Open repo online\"\ntype = \"open-url\"\nurl = \"{github_url}\""));
+    }
+
+    #[test]
+    fn navgator_config_overrides_other_config_paths() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let old_navgator = env::var("NAVGATOR_CONFIG").ok();
+        let old_xdg = env::var("XDG_CONFIG_HOME").ok();
+        env::set_var("NAVGATOR_CONFIG", "/tmp/navgator-only.toml");
+        env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-config");
+
+        let paths = config_paths(&PathBuf::from("/home/example"));
+
+        restore_env("NAVGATOR_CONFIG", old_navgator);
+        restore_env("XDG_CONFIG_HOME", old_xdg);
+        assert_eq!(paths, vec![PathBuf::from("/tmp/navgator-only.toml")]);
+    }
+
+    #[test]
+    fn empty_xdg_config_home_uses_home_config_dir() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let old_navgator = env::var("NAVGATOR_CONFIG").ok();
+        let old_xdg = env::var("XDG_CONFIG_HOME").ok();
+        env::remove_var("NAVGATOR_CONFIG");
+        env::set_var("XDG_CONFIG_HOME", "");
+
+        let paths = config_paths(&PathBuf::from("/home/example"));
+
+        restore_env("NAVGATOR_CONFIG", old_navgator);
+        restore_env("XDG_CONFIG_HOME", old_xdg);
+        assert!(paths.contains(&PathBuf::from("/home/example/.config/navgator/config.toml")));
+    }
+
+    #[test]
+    fn schema_link_is_inserted_for_config_without_paths() {
+        let path =
+            env::temp_dir().join(format!("navgator-schema-test-{}.toml", std::process::id()));
+        fs::write(&path, "[ui]\ntheme = \"dark\"\n").expect("write temp config");
+        let config = ConfigFile {
+            ui: None,
+            ..ConfigFile::default()
+        };
+
+        ensure_schema_link_in_config_file(&path, &config);
+
+        let contents = fs::read_to_string(&path).expect("read temp config");
+        let _ = fs::remove_file(&path);
+        assert!(contents.starts_with(&format!("\"$schema\" = \"{CONFIG_SCHEMA_URL}\"")));
+        assert!(contents.contains("[ui]\ntheme = \"dark\""));
+    }
+
+    #[test]
+    fn action_config_falls_back_when_no_valid_items_remain() {
+        let settings = action_settings_from_config(ConfigActions {
+            defaults: Some(false),
+            items: vec![ConfigAction {
+                label: "".to_string(),
+                kind: ConfigActionKind::Command {
+                    command: "".to_string(),
+                    args: Vec::new(),
+                    current_dir: None,
+                },
+            }],
+        });
+
+        assert!(matches!(
+            settings.items.first().map(|action| &action.kind),
+            Some(ActionKind::Navigate)
+        ));
+    }
+
+    #[test]
+    fn later_config_overrides_scalar_settings_and_merges_paths() {
+        let home = PathBuf::from("/Users/example");
+        let base = env::temp_dir().join(format!("navgator-config-{}", std::process::id()));
+        fs::create_dir_all(base.join("one")).expect("create one");
+        fs::create_dir_all(base.join("two")).expect("create two");
+        let mut state = ConfigLoadState::new();
+        let first = toml_config(
+            r#"
+            [paths]
+            index_folders = ["one"]
+
+            [sort]
+            default = "alpha-asc"
+            "#,
+        );
+        let second = toml_config(
+            r#"
+            [paths]
+            index_folders = ["two"]
+
+            [sort]
+            default = "alpha-desc"
+            "#,
+        );
+
+        state.apply_config_file(first, &base, &home);
+        state.apply_config_file(second, &base, &home);
+
+        let _ = fs::remove_dir_all(&base);
+        assert_eq!(
+            state.index_folders,
+            vec![base.join("one"), base.join("two")]
+        );
+        assert!(matches!(
+            state.sort_settings.default_mode,
+            SortMode::AlphaDesc
+        ));
+    }
+
+    fn toml_config(contents: &str) -> ConfigFile {
+        Figment::from(Toml::string(contents))
+            .extract()
+            .expect("valid config")
+    }
+
+    fn restore_env(name: &str, value: Option<String>) {
+        if let Some(value) = value {
+            env::set_var(name, value);
+        } else {
+            env::remove_var(name);
+        }
+    }
 }

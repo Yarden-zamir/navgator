@@ -47,6 +47,8 @@ pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<
             spans.push(Span::styled(" clear  ", regular_style));
             spans.push(Span::styled("Ctrl+Y", key_style));
             spans.push(Span::styled(" copy  ", regular_style));
+            spans.push(Span::styled("Ctrl+Enter", key_style));
+            spans.push(Span::styled(" actions  ", regular_style));
             if context.can_delete_worktree {
                 spans.push(Span::styled("Ctrl+D", key_style));
                 spans.push(Span::styled(" delete  ", regular_style));
@@ -83,6 +85,8 @@ pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<
             spans.push(Span::styled(" tag  ", regular_style));
             spans.push(Span::styled("Ctrl+Y", key_style));
             spans.push(Span::styled(" copy  ", regular_style));
+            spans.push(Span::styled("Ctrl+Enter", key_style));
+            spans.push(Span::styled(" actions  ", regular_style));
             if context.can_delete_worktree {
                 spans.push(Span::styled("Ctrl+D", key_style));
                 spans.push(Span::styled(" delete  ", regular_style));
@@ -129,6 +133,8 @@ pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<
             spans.push(Span::styled(" tag  ", regular_style));
             spans.push(Span::styled("Ctrl+Y", key_style));
             spans.push(Span::styled(" copy  ", regular_style));
+            spans.push(Span::styled("Ctrl+Enter", key_style));
+            spans.push(Span::styled(" actions  ", regular_style));
             if context.can_delete_worktree {
                 spans.push(Span::styled("Ctrl+D", key_style));
                 spans.push(Span::styled(" delete  ", regular_style));
