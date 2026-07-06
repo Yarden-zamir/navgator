@@ -9,7 +9,7 @@
 9. The picker moves selection up with Up.
 10. The picker moves selection down with j.
 11. The picker moves selection up with k.
-12. The picker runs the highlighted action with Enter.
+12. The picker runs the highlighted action with Enter and keeps the parent shell session open.
 13. The picker wraps from the last action to the first action when moving down.
 14. The picker wraps from the first action to the last action when moving up.
 15. The picker shows action labels exactly as configured.
@@ -69,7 +69,7 @@
 69. GitHub URL resolution supports SSH GitHub remotes.
 70. GitHub URL resolution supports ssh:// GitHub remotes.
 71. Non-GitHub remotes do not produce {github_url}.
-72. Action execution starts only after the terminal has restored the cursor.
+72. The picker runs the highlighted action with Ctrl+Enter and asks the shell wrapper to close the parent shell session after the action succeeds.
 73. GUI launcher actions should not block the shell longer than the launcher command itself.
 74. Terminal session actions may block until the launched command exits.
 75. If a command fails to spawn, navgator returns an error.
@@ -77,7 +77,7 @@
 77. If a blocking terminal command exits unsuccessfully, navgator returns an error.
 78. The zsh wrapper should not cd when a non-navigate action runs.
 79. The zsh wrapper should accept the line after navgator exits successfully.
-80. Non-navigate actions should write no path to GATOR_OUTPUT.
+80. Non-navigate actions should write no path to GATOR_OUTPUT unless Ctrl+Enter requested a close-session marker.
 81. Config schema generation includes the actions table.
 82. Config schema generation includes action item variants.
 83. The README documents Ctrl+Enter actions.

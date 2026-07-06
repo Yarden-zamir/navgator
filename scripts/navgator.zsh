@@ -26,14 +26,15 @@ _navgator_bin() {
 }
 
 navigate() {
-  local bin dir tmp exit_status
+  local bin dir tmp exit_status close_session
+  local -a output_lines
   bin="$(_navgator_bin)" || { echo "navgator binary not found" >&2; return 127; }
   tmp="$(mktemp -t navgator.XXXXXX)" || return 1
   [[ -n "$ZLE" ]] && zle -I
   if command -v script >/dev/null 2>&1; then
-    GATOR_OUTPUT="$tmp" script -q /dev/null "$bin" navigate </dev/tty >/dev/tty 2>/dev/tty
+    NAVGATOR_OUTPUT_PROTOCOL=2 GATOR_OUTPUT="$tmp" script -q /dev/null "$bin" navigate </dev/tty >/dev/tty 2>/dev/tty
   else
-    GATOR_OUTPUT="$tmp" "$bin" navigate </dev/tty >/dev/tty 2>/dev/tty
+    NAVGATOR_OUTPUT_PROTOCOL=2 GATOR_OUTPUT="$tmp" "$bin" navigate </dev/tty >/dev/tty 2>/dev/tty
   fi
   exit_status=$?
   if [[ $exit_status -ne 0 ]]; then
@@ -41,7 +42,13 @@ navigate() {
     return $exit_status
   fi
   if [[ -s "$tmp" ]]; then
-    dir="$(<"$tmp")"
+    output_lines=("${(@f)$(<"$tmp")}")
+    if [[ "${output_lines[1]}" == "__NAVGATOR_CLOSE_SESSION__" ]]; then
+      close_session=1
+      dir="${output_lines[2]}"
+    else
+      dir="$(<"$tmp")"
+    fi
   fi
   rm -f "$tmp"
   if [[ -n "$dir" ]]; then
@@ -49,6 +56,9 @@ navigate() {
   fi
   zle accept-line
   BUFFER=""
+  if [[ -n "$close_session" ]]; then
+    exit
+  fi
 }
 
 zle -N navigate

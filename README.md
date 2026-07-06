@@ -52,7 +52,7 @@ command = "zsh"
 current_dir = "{path}"
 ```
 
-Runtime defaults still exist when no actions are configured. Use `defaults = true` to include built-ins before custom actions, or `defaults = false` to use only listed actions. Built-in actions navigate to the target, open GitHub Desktop, open VS Code, run `idea .`, open the repo online, start `claude`, and start `opencode`. Custom command and URL actions can use `{path}` and `{github_url}` placeholders.
+Runtime defaults still exist when no actions are configured. Use `defaults = true` to include built-ins before custom actions, or `defaults = false` to use only listed actions. Built-in actions navigate to the target, open GitHub Desktop, open VS Code, run `idea .`, open the repo online, start `claude`, and start `opencode`. Custom command and URL actions can use `{path}` and `{github_url}` placeholders. In the action picker, `Enter` runs the action and keeps the shell session open; `Ctrl+Enter` runs it and asks the zsh wrapper to close the shell session afterward.
 
 ## Build
 

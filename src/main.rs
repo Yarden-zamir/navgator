@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    env,
+    env, fs,
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
@@ -136,15 +136,35 @@ fn run_navigate() -> AppResult<()> {
         result.action_settings,
         result.theme_colors,
     )? {
-        Some(NavigateOutcome::Navigate(choice)) => write_selection(&choice),
-        Some(NavigateOutcome::RunAction(action)) => run_action(action).map_err(Into::into),
+        Some(NavigateOutcome::Navigate {
+            path,
+            close_session,
+        }) => write_navigation_outcome(&path, close_session),
+        Some(NavigateOutcome::RunAction {
+            action,
+            close_session,
+        }) => {
+            run_action(action)?;
+            if close_session {
+                write_close_session_outcome(None)?;
+            }
+            Ok(())
+        }
         None => std::process::exit(1),
     }
 }
 
+const CLOSE_SESSION_MARKER: &str = "__NAVGATOR_CLOSE_SESSION__";
+
 enum NavigateOutcome {
-    Navigate(String),
-    RunAction(ResolvedAction),
+    Navigate {
+        path: String,
+        close_session: bool,
+    },
+    RunAction {
+        action: ResolvedAction,
+        close_session: bool,
+    },
 }
 
 enum ResolvedAction {
@@ -167,24 +187,65 @@ struct ActionPickerColors {
     muted: Color,
 }
 
-fn run_action(action: ResolvedAction) -> Result<(), String> {
-    match action {
+fn run_action(action: ResolvedAction) -> AppResult<()> {
+    let result = match action {
         ResolvedAction::Command {
             command,
             args,
             current_dir,
         } => commands::run_interactive_command(&command, &args, current_dir.as_deref()),
         ResolvedAction::OpenUrl(url) => commands::open_url(&url),
+    };
+    result.map_err(Into::into)
+}
+
+fn write_navigation_outcome(path: &str, close_session: bool) -> AppResult<()> {
+    if close_session {
+        write_close_session_outcome(Some(path))
+    } else {
+        write_selection(path)
     }
+}
+
+fn write_close_session_outcome(path: Option<&str>) -> AppResult<()> {
+    if env::var("NAVGATOR_OUTPUT_PROTOCOL").ok().as_deref() != Some("2") {
+        if let Some(path) = path {
+            write_selection(path)?;
+        }
+        return Ok(());
+    }
+
+    let Some(output_path) = env::var_os("GATOR_OUTPUT") else {
+        if let Some(path) = path {
+            println!("{path}");
+        }
+        return Ok(());
+    };
+
+    let contents = match path {
+        Some(path) => format!("{CLOSE_SESSION_MARKER}\n{path}\n"),
+        None => format!("{CLOSE_SESSION_MARKER}\n"),
+    };
+    fs::write(&output_path, contents).map_err(|err| {
+        format!(
+            "Failed to write navgator close-session output {}: {err}",
+            PathBuf::from(output_path).display()
+        )
+        .into()
+    })
 }
 
 fn resolve_picker_action(
     action: Option<&ActionDefinition>,
     path: Option<&str>,
+    close_session: bool,
 ) -> Option<NavigateOutcome> {
     let action = action?;
     match &action.kind {
-        ActionKind::Navigate => path.map(|value| NavigateOutcome::Navigate(value.to_string())),
+        ActionKind::Navigate => path.map(|value| NavigateOutcome::Navigate {
+            path: value.to_string(),
+            close_session,
+        }),
         ActionKind::Command {
             command,
             args,
@@ -205,16 +266,22 @@ fn resolve_picker_action(
             } else {
                 Some(PathBuf::from(current_dir_value))
             };
-            Some(NavigateOutcome::RunAction(ResolvedAction::Command {
-                command,
-                args,
-                current_dir,
-            }))
+            Some(NavigateOutcome::RunAction {
+                action: ResolvedAction::Command {
+                    command,
+                    args,
+                    current_dir,
+                },
+                close_session,
+            })
         }
         ActionKind::OpenUrl { url } => {
             let github_url = github_url_for_action(path);
             let url = expand_action_value(url, path, github_url.as_deref())?;
-            Some(NavigateOutcome::RunAction(ResolvedAction::OpenUrl(url)))
+            Some(NavigateOutcome::RunAction {
+                action: ResolvedAction::OpenUrl(url),
+                close_session,
+            })
         }
     }
 }
@@ -374,7 +441,10 @@ fn select_from_list(
                 }
                 WorktreeProgress::Select(path) => {
                     terminal.show_cursor()?;
-                    return Ok(Some(NavigateOutcome::Navigate(path)));
+                    return Ok(Some(NavigateOutcome::Navigate {
+                        path,
+                        close_session: false,
+                    }));
                 }
                 WorktreeProgress::Deleted(path) => {
                     entries.retain(|entry| entry.selection_path != path);
@@ -984,6 +1054,7 @@ fn select_from_list(
                                 let Some(picker) = action_picker.as_ref() else {
                                     continue;
                                 };
+                                let close_session = key.modifiers.contains(KeyModifiers::CONTROL);
                                 let action = action_settings.items.get(picker.selected);
                                 let path = selection_path_for_action(
                                     focus,
@@ -993,7 +1064,7 @@ fn select_from_list(
                                     current_selection_entry(&entries, &filtered, selected),
                                 );
                                 if let Some(outcome) =
-                                    resolve_picker_action(action, path.as_deref())
+                                    resolve_picker_action(action, path.as_deref(), close_session)
                                 {
                                     terminal.show_cursor()?;
                                     return Ok(Some(outcome));
@@ -1167,7 +1238,10 @@ fn select_from_list(
                         );
                         if let Some(value) = value {
                             terminal.show_cursor()?;
-                            return Ok(Some(NavigateOutcome::Navigate(value)));
+                            return Ok(Some(NavigateOutcome::Navigate {
+                                path: value,
+                                close_session: false,
+                            }));
                         }
                     }
                     if key.code == KeyCode::Char('s')
@@ -1715,7 +1789,7 @@ fn render_action_picker(
         .map(|action| action.label.chars().count() as u16)
         .max()
         .unwrap_or(24)
-        .saturating_add(10);
+        .saturating_add(18);
     let width = content_width.clamp(36, 72).min(area.width);
     let height = (actions.len() as u16)
         .saturating_add(4)
@@ -1789,6 +1863,13 @@ fn render_action_picker(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" run  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Ctrl+Enter",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" run+close  ", Style::default().fg(colors.muted)),
         Span::styled(
             "Esc",
             Style::default()
@@ -2176,6 +2257,43 @@ mod tests {
     }
 
     #[test]
+    fn picker_ctrl_enter_marks_action_for_session_close() {
+        let action = ActionDefinition {
+            label: "Navigate".to_string(),
+            kind: ActionKind::Navigate,
+        };
+
+        let outcome = resolve_picker_action(Some(&action), Some("/repos/project"), true)
+            .expect("resolved action");
+
+        assert!(matches!(
+            outcome,
+            NavigateOutcome::Navigate {
+                path,
+                close_session: true,
+            } if path == "/repos/project"
+        ));
+    }
+
+    #[test]
+    fn close_session_output_protocol_writes_marker_and_path() {
+        let old_protocol = env::var("NAVGATOR_OUTPUT_PROTOCOL").ok();
+        let old_output = env::var_os("GATOR_OUTPUT");
+        let path =
+            env::temp_dir().join(format!("navgator-close-session-{}.txt", std::process::id()));
+        env::set_var("NAVGATOR_OUTPUT_PROTOCOL", "2");
+        env::set_var("GATOR_OUTPUT", &path);
+
+        write_close_session_outcome(Some("/repos/project")).expect("write outcome");
+
+        restore_env_var("NAVGATOR_OUTPUT_PROTOCOL", old_protocol);
+        restore_env_os("GATOR_OUTPUT", old_output);
+        let contents = fs::read_to_string(&path).expect("read outcome");
+        let _ = fs::remove_file(&path);
+        assert_eq!(contents, "__NAVGATOR_CLOSE_SESSION__\n/repos/project\n");
+    }
+
+    #[test]
     fn applies_git_result_to_one_preview_tab() {
         let mut data = PreviewData {
             previews: vec![
@@ -2393,6 +2511,22 @@ mod tests {
             metadata_path: path.to_string(),
             search_text: vec![display.to_string()],
             kind: model::NavigateEntryKind::Project,
+        }
+    }
+
+    fn restore_env_var(name: &str, value: Option<String>) {
+        if let Some(value) = value {
+            env::set_var(name, value);
+        } else {
+            env::remove_var(name);
+        }
+    }
+
+    fn restore_env_os(name: &str, value: Option<std::ffi::OsString>) {
+        if let Some(value) = value {
+            env::set_var(name, value);
+        } else {
+            env::remove_var(name);
         }
     }
 
