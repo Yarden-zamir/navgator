@@ -241,18 +241,11 @@ pub(crate) fn add_worktree_for_remote_with_progress(
     remote_branch: &str,
     mut progress: impl FnMut(String),
 ) -> Result<String, String> {
-    let branch = local_branch_for_remote(remote_branch);
+    let branch = prepare_remote_branch_with_progress(bare, remote_branch, &mut progress)?;
     progress(format!("Checking worktrees for {branch}"));
     if let Some(existing) = worktree_for_branch(bare, &branch) {
         progress(format!("Using existing worktree at {existing}"));
         return Ok(existing);
-    }
-
-    if !remote_ref_exists(bare, remote_branch) {
-        progress(format!("Fetching {remote_branch}"));
-        fetch_remote_branch(bare, remote_branch)?;
-    } else {
-        progress(format!("Remote ref {remote_branch} is available locally"));
     }
 
     let target = remote_branch_target_path(bare, container, remote_branch);
@@ -286,6 +279,61 @@ pub(crate) fn add_worktree_for_remote_with_progress(
     }
     progress(format!("Created {}", target.display()));
     Ok(target.to_string_lossy().to_string())
+}
+
+pub(crate) fn checkout_remote_branch_with_progress(
+    bare: &Path,
+    remote_branch: &str,
+    mut progress: impl FnMut(String),
+) -> Result<String, String> {
+    let branch = prepare_remote_branch_with_progress(bare, remote_branch, &mut progress)?;
+    progress(format!("Checking worktrees for {branch}"));
+    if let Some(existing) = worktree_for_branch(bare, &branch) {
+        progress(format!("Using existing checkout at {existing}"));
+        return Ok(existing);
+    }
+
+    let Some(worktree) = selectable_worktree_path_for_project(bare) else {
+        return Err("checkout mode needs an existing worktree".to_string());
+    };
+
+    progress(format!("Checking out {branch} in {worktree}"));
+    let mut command = Command::new("git");
+    command.arg("-C").arg(&worktree).arg("checkout");
+    if branch_exists(bare, &branch) {
+        command.arg(&branch);
+    } else {
+        command.arg("-b").arg(&branch).arg(remote_branch);
+    }
+    let output = command
+        .env("NO_COLOR", "1")
+        .output()
+        .map_err(|err| format!("failed to run git checkout: {err}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return if stderr.is_empty() {
+            Err(format!("failed to checkout {branch}"))
+        } else {
+            Err(stderr)
+        };
+    }
+    progress(format!("Checked out {branch}"));
+    Ok(worktree)
+}
+
+fn prepare_remote_branch_with_progress(
+    bare: &Path,
+    remote_branch: &str,
+    progress: &mut impl FnMut(String),
+) -> Result<String, String> {
+    let branch = local_branch_for_remote(remote_branch);
+    if !remote_ref_exists(bare, remote_branch) {
+        progress(format!("Fetching {remote_branch}"));
+        fetch_remote_branch(bare, remote_branch)?;
+    } else {
+        progress(format!("Remote ref {remote_branch} is available locally"));
+    }
+    Ok(branch)
 }
 
 pub(crate) fn remove_worktree_safely_with_progress(
@@ -679,4 +727,116 @@ fn git_branch_label(branch: &str) -> String {
         return value.to_string();
     }
     branch.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{env, fs, process::Command};
+
+    #[test]
+    fn checkout_remote_branch_uses_existing_worktree() {
+        let root = env::temp_dir().join(format!("navgator-checkout-remote-{}", std::process::id()));
+        let bare = root.join(".bare");
+        let main = root.join("main");
+        fs::create_dir_all(&root).expect("create root");
+
+        run_git(&["init", "--bare", bare.to_str().expect("bare path")]);
+        run_git(&[
+            "--git-dir",
+            bare.to_str().expect("bare path"),
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ]);
+        run_git(&[
+            "--git-dir",
+            bare.to_str().expect("bare path"),
+            "worktree",
+            "add",
+            main.to_str().expect("main path"),
+            "-b",
+            "main",
+        ]);
+        run_git(&[
+            "-C",
+            main.to_str().expect("main path"),
+            "-c",
+            "user.name=Navgator Test",
+            "-c",
+            "user.email=navgator@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "initial",
+        ]);
+        let commit = git_output(&[
+            "--git-dir",
+            bare.to_str().expect("bare path"),
+            "rev-parse",
+            "refs/heads/main",
+        ]);
+        run_git(&[
+            "--git-dir",
+            bare.to_str().expect("bare path"),
+            "update-ref",
+            "refs/remotes/origin/feature",
+            commit.trim(),
+        ]);
+
+        let mut messages = Vec::new();
+        let result = checkout_remote_branch_with_progress(&bare, "origin/feature", |message| {
+            messages.push(message)
+        })
+        .expect("checkout remote branch");
+
+        assert_eq!(
+            PathBuf::from(&result).canonicalize().expect("result path"),
+            main.canonicalize().expect("main path")
+        );
+        assert_eq!(
+            git_output(&[
+                "-C",
+                main.to_str().expect("main path"),
+                "branch",
+                "--show-current",
+            ]),
+            "feature"
+        );
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("Remote ref origin/feature")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn run_git(args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_output(args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string()
+    }
 }

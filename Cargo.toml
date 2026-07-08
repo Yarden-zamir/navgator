@@ -2,7 +2,7 @@
 name = "navgator"
 version = "0.1.1"
 edition = "2021"
-description = "Rust TUI project navigator with Git worktree and preview support"
+description = "🐊 Rust TUI project navigator with Git worktree and preview support"
 license = "MIT"
 repository = "https://github.com/Yarden-zamir/navgator"
 keywords = ["tui", "ratatui", "git", "worktree", "cli"]

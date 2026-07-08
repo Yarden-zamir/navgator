@@ -1,6 +1,6 @@
-1. The action picker is a modal opened from the main navigator UI with Ctrl+Enter.
+1. The action picker is a modal opened from the main navigator UI with configured picker bindings.
 2. Plain Enter keeps its existing behavior and navigates to the selected target.
-3. Ctrl+Enter must not change the selected result or search query before opening the picker.
+3. Configured picker bindings must not change the selected result or search query before opening the picker.
 4. The picker is unavailable while tag editing is active.
 5. The picker is unavailable while a worktree progress overlay is active.
 6. The picker closes with Esc without running an action.
@@ -10,18 +10,23 @@
 10. The picker moves selection down with j.
 11. The picker moves selection up with k.
 12. The picker runs the highlighted action with Enter and keeps the parent shell session open.
-13. The picker wraps from the last action to the first action when moving down.
-14. The picker wraps from the first action to the last action when moving up.
-15. The picker shows action labels exactly as configured.
-16. The picker highlights one action at all times when actions exist.
-17. The picker never opens with an empty action list.
-18. If configuration produces no valid actions, built-in default actions are used.
+13. The picker filters actions when the user types a search query.
+14. Backspace removes one character from the action search query.
+15. The picker wraps from the last visible action to the first visible action when moving down.
+16. The picker wraps from the first visible action to the last visible action when moving up.
+17. The picker shows action labels exactly as configured.
+18. The picker may show configured icons before labels.
+19. The picker highlights one visible action when visible actions exist.
+20. The picker can show an empty-state message when no actions match search or file conditions.
+21. If configuration produces no valid actions, built-in default actions are used.
+22. Picker bindings default to Ctrl+Enter and Ctrl+Space.
+23. The UI shows only the first configured picker binding.
 19. Actions are configured under the TOML actions table.
-20. The actions.defaults option controls whether built-in actions are included.
-21. actions.defaults defaults to true.
+20. Listed actions replace built-ins by default.
+21. include_defaults = true prepends built-ins before listed actions.
 22. Custom actions are configured in actions.items.
-23. Custom actions are appended after built-in actions when defaults are enabled.
-24. Custom actions replace built-in actions when defaults is false.
+23. Custom actions are appended after built-in actions when include_defaults is enabled.
+24. Custom actions replace built-in actions when include_defaults is omitted or false.
 25. A custom action with an empty label is ignored.
 26. A command action with an empty command is ignored.
 27. An open-url action with an empty url is ignored.
@@ -69,7 +74,12 @@
 69. GitHub URL resolution supports SSH GitHub remotes.
 70. GitHub URL resolution supports ssh:// GitHub remotes.
 71. Non-GitHub remotes do not produce {github_url}.
-72. The picker runs the highlighted action with Ctrl+Enter and asks the shell wrapper to close the parent shell session after the action succeeds.
+72. The picker runs the highlighted action with any configured picker binding and asks the shell wrapper to close the parent shell session after the action succeeds.
+72. Action icons support Nerd Font glyphs and emoji.
+72. Action file_condition is resolved relative to the selected target path when it is relative.
+72. Actions with unmet file_condition are hidden from the picker.
+72. `navgator actions` opens directly to the action picker for the first result.
+72. `navgator actions <path>` opens directly to the action picker for the provided path.
 73. GUI launcher actions should not block the shell longer than the launcher command itself.
 74. Terminal session actions may block until the launched command exits.
 75. If a command fails to spawn, navgator returns an error.
@@ -77,16 +87,16 @@
 77. If a blocking terminal command exits unsuccessfully, navgator returns an error.
 78. The zsh wrapper should not cd when a non-navigate action runs.
 79. The zsh wrapper should accept the line after navgator exits successfully.
-80. Non-navigate actions should write no path to GATOR_OUTPUT unless Ctrl+Enter requested a close-session marker.
+80. Non-navigate actions should write no path to GATOR_OUTPUT unless a picker binding requested a close-session marker.
 81. Config schema generation includes the actions table.
 82. Config schema generation includes action item variants.
-83. The README documents Ctrl+Enter actions.
-84. The README documents actions.defaults.
+83. The README documents action picker bindings.
+84. The README documents actions.include_defaults.
 85. The README documents actions.items.
 86. The README documents {path}.
 87. The README documents {github_url}.
-88. The help line shows Ctrl+Enter actions outside tag editing.
-89. The help line does not show Ctrl+Enter actions during tag editing.
+88. The help line shows the first configured picker binding outside tag editing.
+89. The help line does not show action picker bindings during tag editing.
 90. The picker rendering should reuse the existing rounded modal visual style.
 91. The picker should fit small terminals by clamping modal width and height.
 92. The picker should show a concise footer with Enter and Esc hints.

@@ -1,4 +1,4 @@
-use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
@@ -40,11 +40,12 @@ use gator::{copy_to_clipboard, ensure_tty_stdin, input_at_end, setup_terminal, w
 use github::ensure_github_readme_for_preview;
 use metadata::{ensure_dates_for_paths, spawn_bulk_metadata_fetch};
 use model::{
-    ActionDefinition, ActionKind, ActionSettings, AppResult, Focus, GitResult, GithubReadmeResult,
-    HelpColors, HelpContext, MetaResult, NavigateEntry, NavigateEntryKind, PreviewColors,
-    PreviewData, PreviewResult, PreviewSettings, RemoteSettings, RemoteToggleState, ResultUpdate,
-    SidePanelRender, SortMeta, SortMode, SortSettings, TagResult, ThemeColors, VisibleListArgs,
-    DATE_PLACEHOLDER,
+    ActionBinding, ActionBindingKey, ActionDefinition, ActionKind, ActionSettings, AppResult,
+    BranchSelectBehavior, BranchSettings, CreateDefinition, CreatePromptKind, CreateSettings,
+    Focus, GitResult, GithubReadmeResult, HelpColors, HelpContext, MetaResult, NavigateEntry,
+    NavigateEntryKind, PreviewColors, PreviewData, PreviewResult, PreviewSettings, RemoteSettings,
+    RemoteToggleState, ResultUpdate, SidePanelRender, SortMeta, SortMode, SortSettings, TagResult,
+    ThemeColors, VisibleListArgs, DATE_PLACEHOLDER,
 };
 use results::{
     build_items, spawn_remote_branch_result_provider, spawn_worktree_result_provider,
@@ -65,7 +66,16 @@ fn main() -> AppResult<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() || args[0] == "navigate" {
         ensure_tty_stdin()?;
-        return run_navigate();
+        return run_navigate(ActionLaunch::None);
+    }
+    if args[0] == "actions" || args[0] == "action-picker" {
+        ensure_tty_stdin()?;
+        let launch = if let Some(path) = args.get(1) {
+            ActionLaunch::Path(PathBuf::from(path))
+        } else {
+            ActionLaunch::FirstResult
+        };
+        return run_navigate(launch);
     }
     if args[0] == "config-schema" || args[0] == "schema" {
         return print_config_schema();
@@ -81,7 +91,7 @@ fn main() -> AppResult<()> {
 }
 
 fn print_usage() {
-    eprintln!("Usage:\n  navgator [navigate|config-schema]");
+    eprintln!("Usage:\n  navgator [navigate|actions [path]|config-schema]");
 }
 
 fn print_config_schema() -> AppResult<()> {
@@ -94,6 +104,12 @@ enum WorktreeProgress {
     Message(String),
     Select(String),
     Deleted(String),
+    Error(String),
+}
+
+enum CreateProgress {
+    Message(String),
+    Select(String),
     Error(String),
 }
 
@@ -125,17 +141,25 @@ impl WorktreeOverlay {
     }
 }
 
-fn run_navigate() -> AppResult<()> {
+enum ActionLaunch {
+    None,
+    FirstResult,
+    Path(PathBuf),
+}
+
+fn run_navigate(action_launch: ActionLaunch) -> AppResult<()> {
     let result = build_items()?;
-    match select_from_list(
-        "Navigate",
-        result.entries,
-        result.preview_settings,
-        result.sort_settings,
-        result.remote_settings,
-        result.action_settings,
-        result.theme_colors,
-    )? {
+    match select_from_list(SelectListArgs {
+        entries: result.entries,
+        preview_settings: result.preview_settings,
+        sort_settings: result.sort_settings,
+        remote_settings: result.remote_settings,
+        branch_settings: result.branch_settings,
+        action_settings: result.action_settings,
+        create_settings: result.create_settings,
+        theme_colors: result.theme_colors,
+        action_launch,
+    })? {
         Some(NavigateOutcome::Navigate {
             path,
             close_session,
@@ -167,6 +191,18 @@ enum NavigateOutcome {
     },
 }
 
+struct SelectListArgs {
+    entries: Vec<NavigateEntry>,
+    preview_settings: PreviewSettings,
+    sort_settings: SortSettings,
+    remote_settings: RemoteSettings,
+    branch_settings: BranchSettings,
+    action_settings: ActionSettings,
+    create_settings: CreateSettings,
+    theme_colors: ThemeColors,
+    action_launch: ActionLaunch,
+}
+
 enum ResolvedAction {
     Command {
         command: String,
@@ -178,13 +214,73 @@ enum ResolvedAction {
 
 struct ActionPicker {
     selected: usize,
+    query: String,
+    fixed_path: Option<String>,
 }
 
+#[derive(Clone, Copy)]
 struct ActionPickerColors {
     accent: Color,
     warm: Color,
     text: Color,
     muted: Color,
+}
+
+struct ActionPickerRender<'a> {
+    actions: &'a [ActionDefinition],
+    visible_actions: &'a [usize],
+    selected: usize,
+    query: &'a str,
+    action_binding_label: &'a str,
+    colors: ActionPickerColors,
+}
+
+struct CreatePicker {
+    selected: usize,
+    query: String,
+}
+
+struct CreateForm {
+    item_index: usize,
+    active_prompt: usize,
+    focus: CreateFormFocus,
+    inputs: Vec<Input>,
+    path_suggestions: Vec<PathSuggestion>,
+    selected_suggestion: usize,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CreateFormFocus {
+    Fields,
+    Completions,
+}
+
+#[derive(Clone)]
+struct PathSuggestion {
+    display: String,
+    value: String,
+    is_dir: bool,
+}
+
+enum CreateModal {
+    Picker(CreatePicker),
+    Form(CreateForm),
+}
+
+struct CreatePickerRender<'a> {
+    items: &'a [CreateDefinition],
+    visible_items: &'a [usize],
+    selected: usize,
+    query: &'a str,
+    create_binding_label: &'a str,
+    colors: ActionPickerColors,
+}
+
+struct CreateFormRender<'a> {
+    item: &'a CreateDefinition,
+    form: &'a CreateForm,
+    colors: ActionPickerColors,
 }
 
 fn run_action(action: ResolvedAction) -> AppResult<()> {
@@ -330,15 +426,477 @@ fn previous_picker_index(selected: usize, len: usize) -> usize {
     }
 }
 
-fn select_from_list(
-    _title: &str,
-    mut entries: Vec<NavigateEntry>,
-    preview_settings: PreviewSettings,
-    sort_settings: SortSettings,
-    remote_settings: RemoteSettings,
-    action_settings: ActionSettings,
-    theme_colors: ThemeColors,
-) -> AppResult<Option<NavigateOutcome>> {
+fn first_action_binding_label(bindings: &[ActionBinding]) -> String {
+    bindings
+        .first()
+        .map(|binding| binding.label.clone())
+        .unwrap_or_else(|| "Ctrl+Enter".to_string())
+}
+
+fn first_create_binding_label(bindings: &[ActionBinding]) -> String {
+    bindings
+        .first()
+        .map(|binding| binding.label.clone())
+        .unwrap_or_else(|| "Ctrl+N".to_string())
+}
+
+fn matches_action_binding(key: &KeyEvent, bindings: &[ActionBinding]) -> bool {
+    bindings
+        .iter()
+        .any(|binding| matches_action_binding_key(key, &binding.key))
+}
+
+fn matches_action_binding_key(key: &KeyEvent, binding: &ActionBindingKey) -> bool {
+    match binding {
+        ActionBindingKey::CtrlEnter => {
+            key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL)
+        }
+        ActionBindingKey::CtrlSpace => {
+            key.code == KeyCode::Char(' ') && key.modifiers.contains(KeyModifiers::CONTROL)
+        }
+        ActionBindingKey::CtrlN => {
+            key.code == KeyCode::Char('n') && key.modifiers.contains(KeyModifiers::CONTROL)
+        }
+    }
+}
+
+fn matches_create_binding(key: &KeyEvent, bindings: &[ActionBinding]) -> bool {
+    matches_action_binding(key, bindings)
+}
+
+fn filtered_action_indexes(
+    actions: &[ActionDefinition],
+    query: &str,
+    path: Option<&str>,
+) -> Vec<usize> {
+    let query = query.trim().to_lowercase();
+    actions
+        .iter()
+        .enumerate()
+        .filter(|(_, action)| action_file_condition_matches(action, path))
+        .filter(|(_, action)| {
+            query.is_empty()
+                || action.label.to_lowercase().contains(&query)
+                || action
+                    .icon
+                    .as_deref()
+                    .is_some_and(|icon| icon.to_lowercase().contains(&query))
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn filtered_create_indexes(items: &[CreateDefinition], query: &str) -> Vec<usize> {
+    let query = query.trim().to_lowercase();
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            query.is_empty()
+                || item.label.to_lowercase().contains(&query)
+                || item
+                    .icon
+                    .as_deref()
+                    .is_some_and(|icon| icon.to_lowercase().contains(&query))
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn action_file_condition_matches(action: &ActionDefinition, path: Option<&str>) -> bool {
+    let Some(condition) = action.file_condition.as_deref() else {
+        return true;
+    };
+    let Some(path) = path else {
+        return false;
+    };
+    let condition_path = Path::new(condition);
+    let target = if condition_path.is_absolute() {
+        condition_path.to_path_buf()
+    } else {
+        Path::new(path).join(condition_path)
+    };
+    target.exists()
+}
+
+fn clamp_picker_selection(picker: &mut ActionPicker, visible_len: usize) {
+    if visible_len == 0 {
+        picker.selected = 0;
+    } else if picker.selected >= visible_len {
+        picker.selected = visible_len - 1;
+    }
+}
+
+fn clamp_create_picker_selection(picker: &mut CreatePicker, visible_len: usize) {
+    if visible_len == 0 {
+        picker.selected = 0;
+    } else if picker.selected >= visible_len {
+        picker.selected = visible_len - 1;
+    }
+}
+
+fn create_form_for_item(
+    item_index: usize,
+    item: &CreateDefinition,
+    selected_path: Option<&str>,
+) -> CreateForm {
+    let mut values = Vec::new();
+    let inputs = item
+        .prompts
+        .iter()
+        .map(|prompt| {
+            let value = prompt
+                .default
+                .as_deref()
+                .map(|default| expand_create_value(default, selected_path, &values))
+                .unwrap_or_default();
+            values.push((
+                prompt.name.clone(),
+                normalized_prompt_value(prompt.kind, &value),
+            ));
+            Input::new(value)
+        })
+        .collect::<Vec<Input>>();
+    let path_suggestions = item
+        .prompts
+        .first()
+        .filter(|prompt| prompt.kind == CreatePromptKind::Path)
+        .and_then(|_| inputs.first())
+        .map(|input| path_suggestions_for_input(input.value()))
+        .unwrap_or_default();
+    CreateForm {
+        item_index,
+        active_prompt: 0,
+        focus: CreateFormFocus::Fields,
+        inputs,
+        path_suggestions,
+        selected_suggestion: 0,
+        error: None,
+    }
+}
+
+fn create_form_current_prompt<'a>(
+    form: &CreateForm,
+    item: &'a CreateDefinition,
+) -> Option<&'a model::CreatePrompt> {
+    item.prompts.get(form.active_prompt)
+}
+
+fn update_create_path_suggestions(form: &mut CreateForm, item: &CreateDefinition) {
+    if create_form_current_prompt(form, item)
+        .is_some_and(|prompt| prompt.kind == CreatePromptKind::Path)
+    {
+        let value = form
+            .inputs
+            .get(form.active_prompt)
+            .map(Input::value)
+            .unwrap_or_default();
+        form.path_suggestions = path_suggestions_for_input(value);
+        form.selected_suggestion = form
+            .selected_suggestion
+            .min(form.path_suggestions.len().saturating_sub(1));
+        if form.path_suggestions.is_empty() {
+            form.focus = CreateFormFocus::Fields;
+        }
+    } else {
+        form.path_suggestions.clear();
+        form.selected_suggestion = 0;
+        form.focus = CreateFormFocus::Fields;
+    }
+}
+
+fn accept_create_path_suggestion(form: &mut CreateForm) {
+    let Some(suggestion) = form.path_suggestions.get(form.selected_suggestion) else {
+        return;
+    };
+    if let Some(input) = form.inputs.get_mut(form.active_prompt) {
+        *input = Input::new(suggestion.value.clone());
+    }
+}
+
+fn move_create_form_prompt(form: &mut CreateForm, item: &CreateDefinition, next: bool) {
+    if item.prompts.is_empty() {
+        form.active_prompt = 0;
+    } else if next {
+        form.active_prompt = next_picker_index(form.active_prompt, item.prompts.len());
+    } else {
+        form.active_prompt = previous_picker_index(form.active_prompt, item.prompts.len());
+    }
+    form.error = None;
+    form.focus = CreateFormFocus::Fields;
+    update_create_path_suggestions(form, item);
+}
+
+fn update_dependent_create_defaults(
+    form: &mut CreateForm,
+    item: &CreateDefinition,
+    selected_path: Option<&str>,
+) {
+    let mut values = Vec::new();
+    for (index, prompt) in item.prompts.iter().enumerate() {
+        let current = form
+            .inputs
+            .get(index)
+            .map(Input::value)
+            .unwrap_or_default()
+            .to_string();
+        if index > form.active_prompt && current.trim().is_empty() {
+            if let Some(default) = prompt.default.as_deref() {
+                let value = expand_create_value(default, selected_path, &values);
+                if let Some(input) = form.inputs.get_mut(index) {
+                    *input = Input::new(value.clone());
+                }
+                values.push((
+                    prompt.name.clone(),
+                    normalized_prompt_value(prompt.kind, &value),
+                ));
+                continue;
+            }
+        }
+        values.push((
+            prompt.name.clone(),
+            normalized_prompt_value(prompt.kind, &current),
+        ));
+    }
+    update_create_path_suggestions(form, item);
+}
+
+fn collect_create_form_values(
+    form: &mut CreateForm,
+    item: &CreateDefinition,
+) -> Option<Vec<(String, String)>> {
+    let mut values = Vec::new();
+    for (index, prompt) in item.prompts.iter().enumerate() {
+        let raw_value = form
+            .inputs
+            .get(index)
+            .map(Input::value)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if prompt.required && raw_value.is_empty() {
+            form.active_prompt = index;
+            form.error = Some(format!("{} is required", prompt.label));
+            update_create_path_suggestions(form, item);
+            return None;
+        }
+        values.push((
+            prompt.name.clone(),
+            normalized_prompt_value(prompt.kind, &raw_value),
+        ));
+    }
+    form.error = None;
+    Some(values)
+}
+
+fn normalized_prompt_value(kind: CreatePromptKind, value: &str) -> String {
+    if kind == CreatePromptKind::Path {
+        expand_home_prefix(value.trim())
+    } else {
+        value.trim().to_string()
+    }
+}
+
+fn create_form_input_row(active_prompt: usize) -> usize {
+    2 + active_prompt.saturating_mul(2)
+}
+
+fn expand_create_value(
+    value: &str,
+    selected_path: Option<&str>,
+    values: &[(String, String)],
+) -> String {
+    let mut expanded = value.to_string();
+    if let Some(path) = selected_path {
+        expanded = expanded.replace("{path}", path);
+    }
+    for (name, prompt_value) in values {
+        expanded = expanded.replace(&format!("{{{name}}}"), prompt_value);
+    }
+    expand_home_prefix(&expanded)
+}
+
+fn create_env_values(
+    selected_path: Option<&str>,
+    values: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut envs = Vec::new();
+    if let Some(path) = selected_path {
+        envs.push(("NAVGATOR_SELECTED_PATH".to_string(), path.to_string()));
+    }
+    for (name, value) in values {
+        envs.push((
+            format!("NAVGATOR_CREATE_{}", name.to_ascii_uppercase()),
+            value.clone(),
+        ));
+    }
+    envs
+}
+
+fn run_create_recipe(
+    item: CreateDefinition,
+    selected_path: Option<String>,
+    values: Vec<(String, String)>,
+    tx: mpsc::Sender<CreateProgress>,
+) {
+    thread::spawn(move || {
+        let selected_path = selected_path.as_deref();
+        let success_path = expand_create_value(&item.success_path, selected_path, &values);
+        if success_path.trim().is_empty() {
+            let _ = tx.send(CreateProgress::Error(
+                "success_path expanded to an empty value".to_string(),
+            ));
+            return;
+        }
+        let current_dir = item
+            .current_dir
+            .as_deref()
+            .map(|value| PathBuf::from(expand_create_value(value, selected_path, &values)));
+        let envs = create_env_values(selected_path, &values);
+        let _ = tx.send(CreateProgress::Message(format!("Running {}", item.label)));
+        match commands::run_shell_recipe(&item.shell, current_dir.as_deref(), &envs) {
+            Ok(result) => {
+                if !result.stdout.is_empty() {
+                    let _ = tx.send(CreateProgress::Message(result.stdout));
+                }
+                let success = PathBuf::from(&success_path);
+                if !success.exists() {
+                    let _ = tx.send(CreateProgress::Error(format!(
+                        "success_path does not exist: {}",
+                        success.display()
+                    )));
+                    return;
+                }
+                let _ = tx.send(CreateProgress::Select(
+                    success.to_string_lossy().to_string(),
+                ));
+            }
+            Err(message) => {
+                let _ = tx.send(CreateProgress::Error(message));
+            }
+        }
+    });
+}
+
+fn path_suggestions_for_input(input: &str) -> Vec<PathSuggestion> {
+    let expanded = expand_home_prefix(input);
+    let expanded_path = Path::new(&expanded);
+    let input_ends_with_separator =
+        input.ends_with('/') || input.ends_with(std::path::MAIN_SEPARATOR);
+    let (parent, partial) = if input_ends_with_separator {
+        (expanded_path, "")
+    } else {
+        (
+            expanded_path.parent().unwrap_or_else(|| Path::new(".")),
+            expanded_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(""),
+        )
+    };
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let mut suggestions = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !partial.is_empty() && !name.starts_with(partial) {
+                return None;
+            }
+            let path = entry.path();
+            let is_dir = path.is_dir();
+            let mut value = path.to_string_lossy().to_string();
+            if is_dir && !value.ends_with(std::path::MAIN_SEPARATOR) {
+                value.push(std::path::MAIN_SEPARATOR);
+            }
+            Some(PathSuggestion {
+                display: if is_dir { format!("{name}/") } else { name },
+                value: display_path_for_input(&value),
+                is_dir,
+            })
+        })
+        .collect::<Vec<PathSuggestion>>();
+    suggestions.sort_by(|left, right| {
+        right
+            .is_dir
+            .cmp(&left.is_dir)
+            .then(left.display.cmp(&right.display))
+    });
+    suggestions.truncate(8);
+    suggestions
+}
+
+fn expand_home_prefix(value: &str) -> String {
+    if value == "~" {
+        return env::var("HOME").unwrap_or_else(|_| value.to_string());
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if let Ok(home) = env::var("HOME") {
+            return Path::new(&home).join(rest).to_string_lossy().to_string();
+        }
+    }
+    value.to_string()
+}
+
+fn display_path_for_input(value: &str) -> String {
+    let Ok(home) = env::var("HOME") else {
+        return value.to_string();
+    };
+    if value == home {
+        return "~".to_string();
+    }
+    let home_prefix = format!(
+        "{}{}",
+        home.trim_end_matches(std::path::MAIN_SEPARATOR),
+        std::path::MAIN_SEPARATOR
+    );
+    if let Some(rest) = value.strip_prefix(&home_prefix) {
+        return format!("~/{rest}");
+    }
+    value.to_string()
+}
+
+fn action_path_entry(path: &Path) -> NavigateEntry {
+    let path_string = path.to_string_lossy().to_string();
+    let display = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&path_string)
+        .to_string();
+    NavigateEntry {
+        id: format!("action-path:{path_string}"),
+        display,
+        context: None,
+        preview_root_path: path_string.clone(),
+        preferred_preview_path: None,
+        selection_path: path_string.clone(),
+        metadata_path: path_string.clone(),
+        search_text: vec![path_string],
+        kind: NavigateEntryKind::Project,
+    }
+}
+
+fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> {
+    let SelectListArgs {
+        mut entries,
+        preview_settings,
+        sort_settings,
+        remote_settings,
+        branch_settings,
+        action_settings,
+        create_settings,
+        theme_colors,
+        action_launch,
+    } = args;
+    let action_launch = match action_launch {
+        ActionLaunch::Path(path) if entries.is_empty() => {
+            entries.push(action_path_entry(&path));
+            ActionLaunch::Path(path)
+        }
+        other => other,
+    };
     if entries.is_empty() {
         return Ok(None);
     }
@@ -356,6 +914,8 @@ fn select_from_list(
     let key_color = theme_colors.key_color;
     let text = theme_colors.text;
     let muted = theme_colors.muted;
+    let action_binding_label = first_action_binding_label(&action_settings.picker_bindings);
+    let create_binding_label = first_create_binding_label(&create_settings.picker_bindings);
     let (preview_tx, preview_rx) = mpsc::channel::<PreviewResult>();
     let (git_tx, git_rx) = mpsc::channel::<GitResult>();
     let (github_tx, github_rx) = mpsc::channel::<GithubReadmeResult>();
@@ -363,6 +923,7 @@ fn select_from_list(
     let (tag_tx, tag_rx) = mpsc::channel::<TagResult>();
     let (result_tx, result_rx) = mpsc::channel::<ResultUpdate>();
     let (worktree_tx, worktree_rx) = mpsc::channel::<WorktreeProgress>();
+    let (create_tx, create_rx) = mpsc::channel::<CreateProgress>();
     let mut preview_cache: HashMap<String, PreviewData> = HashMap::new();
     let mut git_in_flight: HashSet<String> = HashSet::new();
     let mut github_in_flight: HashSet<String> = HashSet::new();
@@ -407,7 +968,21 @@ fn select_from_list(
     let mut tag_input = Input::default();
     let mut tag_suggestions: Vec<String> = Vec::new();
     let mut worktree_overlay: Option<WorktreeOverlay> = None;
-    let mut action_picker: Option<ActionPicker> = None;
+    let mut create_overlay: Option<WorktreeOverlay> = None;
+    let mut create_modal: Option<CreateModal> = None;
+    let mut action_picker: Option<ActionPicker> = match action_launch {
+        ActionLaunch::None => None,
+        ActionLaunch::FirstResult => Some(ActionPicker {
+            selected: 0,
+            query: String::new(),
+            fixed_path: None,
+        }),
+        ActionLaunch::Path(path) => Some(ActionPicker {
+            selected: 0,
+            query: String::new(),
+            fixed_path: Some(path.to_string_lossy().to_string()),
+        }),
+    };
     spawn_worktree_result_provider(&entries, result_tx.clone());
     if show_remote_branches {
         if let Some(entry) = filtered
@@ -466,6 +1041,28 @@ fn select_from_list(
                 }
                 WorktreeProgress::Error(message) => {
                     if let Some(overlay) = worktree_overlay.as_mut() {
+                        overlay.fail(message);
+                    }
+                }
+            }
+        }
+
+        while let Ok(progress) = create_rx.try_recv() {
+            match progress {
+                CreateProgress::Message(message) => {
+                    if let Some(overlay) = create_overlay.as_mut() {
+                        overlay.push_message(message);
+                    }
+                }
+                CreateProgress::Select(path) => {
+                    terminal.show_cursor()?;
+                    return Ok(Some(NavigateOutcome::Navigate {
+                        path,
+                        close_session: false,
+                    }));
+                }
+                CreateProgress::Error(message) => {
+                    if let Some(overlay) = create_overlay.as_mut() {
                         overlay.fail(message);
                     }
                 }
@@ -981,6 +1578,8 @@ fn select_from_list(
                     detail_tab_index: compositor.detail_tab_index,
                     detail_tab_count: compositor.detail_tabs.len(),
                     detail_scroll: compositor.detail_scroll,
+                    action_binding_label: action_binding_label.clone(),
+                    create_binding_label: create_binding_label.clone(),
                 },
                 HelpColors {
                     text,
@@ -1004,25 +1603,306 @@ fn select_from_list(
             if let Some(overlay) = worktree_overlay.as_ref() {
                 render_worktree_overlay(frame, size.into(), overlay, accent, warm, text, muted);
             }
+            if let Some(overlay) = create_overlay.as_ref() {
+                render_worktree_overlay(frame, size.into(), overlay, accent, warm, text, muted);
+            }
             if let Some(picker) = action_picker.as_ref() {
+                let path = picker.fixed_path.clone().or_else(|| {
+                    selection_path_for_action(
+                        focus,
+                        current.as_deref(),
+                        compositor.active_content_index(),
+                        &preview_cache,
+                        current_selection_entry(&entries, &filtered, selected),
+                    )
+                });
+                let visible_actions =
+                    filtered_action_indexes(&action_settings.items, &picker.query, path.as_deref());
                 render_action_picker(
                     frame,
                     size.into(),
-                    &action_settings.items,
-                    picker.selected,
-                    ActionPickerColors {
-                        accent,
-                        warm,
-                        text,
-                        muted,
+                    ActionPickerRender {
+                        actions: &action_settings.items,
+                        visible_actions: &visible_actions,
+                        selected: picker.selected,
+                        query: &picker.query,
+                        action_binding_label: &action_binding_label,
+                        colors: ActionPickerColors {
+                            accent,
+                            warm,
+                            text,
+                            muted,
+                        },
                     },
                 );
+            }
+            if let Some(modal) = create_modal.as_ref() {
+                match modal {
+                    CreateModal::Picker(picker) => {
+                        let visible_items =
+                            filtered_create_indexes(&create_settings.items, &picker.query);
+                        render_create_picker(
+                            frame,
+                            size.into(),
+                            CreatePickerRender {
+                                items: &create_settings.items,
+                                visible_items: &visible_items,
+                                selected: picker.selected,
+                                query: &picker.query,
+                                create_binding_label: &create_binding_label,
+                                colors: ActionPickerColors {
+                                    accent,
+                                    warm,
+                                    text,
+                                    muted,
+                                },
+                            },
+                        );
+                    }
+                    CreateModal::Form(form) => {
+                        if let Some(item) = create_settings.items.get(form.item_index) {
+                            render_create_form(
+                                frame,
+                                size.into(),
+                                CreateFormRender {
+                                    item,
+                                    form,
+                                    colors: ActionPickerColors {
+                                        accent,
+                                        warm,
+                                        text,
+                                        muted,
+                                    },
+                                },
+                            );
+                        }
+                    }
+                }
             }
         })?;
 
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) => {
+                    if create_modal.is_some() {
+                        let selected_path = selection_path_for_action(
+                            focus,
+                            current.as_deref(),
+                            compositor.active_content_index(),
+                            &preview_cache,
+                            current_selection_entry(&entries, &filtered, selected),
+                        );
+                        let mut close_modal = false;
+                        let mut start_create: Option<(CreateDefinition, Vec<(String, String)>)> =
+                            None;
+                        if let Some(modal) = create_modal.as_mut() {
+                            match modal {
+                                CreateModal::Picker(picker) => {
+                                    if key.code == KeyCode::Esc
+                                        || (key.code == KeyCode::Char('c')
+                                            && key.modifiers.contains(KeyModifiers::CONTROL))
+                                    {
+                                        close_modal = true;
+                                    } else {
+                                        let visible_items = filtered_create_indexes(
+                                            &create_settings.items,
+                                            &picker.query,
+                                        );
+                                        match key.code {
+                                            KeyCode::Enter => {
+                                                if let Some(item_index) =
+                                                    visible_items.get(picker.selected).copied()
+                                                {
+                                                    if let Some(item) =
+                                                        create_settings.items.get(item_index)
+                                                    {
+                                                        if item.prompts.is_empty() {
+                                                            start_create =
+                                                                Some((item.clone(), Vec::new()));
+                                                        } else {
+                                                            *modal = CreateModal::Form(
+                                                                create_form_for_item(
+                                                                    item_index,
+                                                                    item,
+                                                                    selected_path.as_deref(),
+                                                                ),
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            KeyCode::Up | KeyCode::Char('k') => {
+                                                picker.selected = previous_picker_index(
+                                                    picker.selected,
+                                                    visible_items.len(),
+                                                );
+                                            }
+                                            KeyCode::Down | KeyCode::Char('j') => {
+                                                picker.selected = next_picker_index(
+                                                    picker.selected,
+                                                    visible_items.len(),
+                                                );
+                                            }
+                                            KeyCode::Backspace => {
+                                                picker.query.pop();
+                                                let visible_items = filtered_create_indexes(
+                                                    &create_settings.items,
+                                                    &picker.query,
+                                                );
+                                                clamp_create_picker_selection(
+                                                    picker,
+                                                    visible_items.len(),
+                                                );
+                                            }
+                                            KeyCode::Char(value)
+                                                if key.modifiers.is_empty()
+                                                    || key.modifiers == KeyModifiers::SHIFT =>
+                                            {
+                                                picker.query.push(value);
+                                                let visible_items = filtered_create_indexes(
+                                                    &create_settings.items,
+                                                    &picker.query,
+                                                );
+                                                clamp_create_picker_selection(
+                                                    picker,
+                                                    visible_items.len(),
+                                                );
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                CreateModal::Form(form) => {
+                                    if let Some(item) = create_settings.items.get(form.item_index) {
+                                        if key.code == KeyCode::Esc {
+                                            *modal = CreateModal::Picker(CreatePicker {
+                                                selected: form.item_index,
+                                                query: String::new(),
+                                            });
+                                        } else if key.code == KeyCode::Char('c')
+                                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                                        {
+                                            close_modal = true;
+                                        } else {
+                                            match key.code {
+                                                KeyCode::Enter => {
+                                                    if let Some(values) =
+                                                        collect_create_form_values(form, item)
+                                                    {
+                                                        start_create = Some((item.clone(), values));
+                                                    }
+                                                }
+                                                KeyCode::Tab => {
+                                                    accept_create_path_suggestion(form);
+                                                    update_create_path_suggestions(form, item);
+                                                    form.focus = CreateFormFocus::Fields;
+                                                }
+                                                KeyCode::Right => {
+                                                    if !form.path_suggestions.is_empty() {
+                                                        form.focus = CreateFormFocus::Completions;
+                                                    }
+                                                }
+                                                KeyCode::Left => {
+                                                    form.focus = CreateFormFocus::Fields;
+                                                }
+                                                KeyCode::Up => {
+                                                    if form.focus == CreateFormFocus::Completions {
+                                                        form.selected_suggestion =
+                                                            previous_picker_index(
+                                                                form.selected_suggestion,
+                                                                form.path_suggestions.len(),
+                                                            );
+                                                    } else {
+                                                        move_create_form_prompt(form, item, false);
+                                                    }
+                                                }
+                                                KeyCode::Down => {
+                                                    if form.focus == CreateFormFocus::Completions {
+                                                        form.selected_suggestion =
+                                                            next_picker_index(
+                                                                form.selected_suggestion,
+                                                                form.path_suggestions.len(),
+                                                            );
+                                                    } else {
+                                                        move_create_form_prompt(form, item, true);
+                                                    }
+                                                }
+                                                KeyCode::Char('k')
+                                                    if form.focus
+                                                        == CreateFormFocus::Completions =>
+                                                {
+                                                    form.selected_suggestion =
+                                                        previous_picker_index(
+                                                            form.selected_suggestion,
+                                                            form.path_suggestions.len(),
+                                                        );
+                                                }
+                                                KeyCode::Char('j')
+                                                    if form.focus
+                                                        == CreateFormFocus::Completions =>
+                                                {
+                                                    form.selected_suggestion = next_picker_index(
+                                                        form.selected_suggestion,
+                                                        form.path_suggestions.len(),
+                                                    );
+                                                }
+                                                KeyCode::Char('u')
+                                                    if key
+                                                        .modifiers
+                                                        .contains(KeyModifiers::CONTROL) =>
+                                                {
+                                                    if let Some(input) =
+                                                        form.inputs.get_mut(form.active_prompt)
+                                                    {
+                                                        input.reset();
+                                                    }
+                                                    form.error = None;
+                                                    update_dependent_create_defaults(
+                                                        form,
+                                                        item,
+                                                        selected_path.as_deref(),
+                                                    );
+                                                    update_create_path_suggestions(form, item);
+                                                }
+                                                _ => {
+                                                    let Some(input) =
+                                                        form.inputs.get_mut(form.active_prompt)
+                                                    else {
+                                                        continue;
+                                                    };
+                                                    let before = input.value().to_string();
+                                                    let _ = input.handle_event(&Event::Key(key));
+                                                    if input.value() != before {
+                                                        form.error = None;
+                                                        update_dependent_create_defaults(
+                                                            form,
+                                                            item,
+                                                            selected_path.as_deref(),
+                                                        );
+                                                        update_create_path_suggestions(form, item);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        close_modal = true;
+                                    }
+                                }
+                            }
+                        }
+                        if close_modal {
+                            create_modal = None;
+                        }
+                        if let Some((item, values)) = start_create {
+                            create_overlay = Some(WorktreeOverlay::new(
+                                format!("Creating {}", item.label),
+                                "Starting create recipe",
+                            ));
+                            create_modal = None;
+                            run_create_recipe(item, selected_path, values, create_tx.clone());
+                        }
+                        continue;
+                    }
                     if action_picker.is_some() {
                         if key.code == KeyCode::Esc
                             || (key.code == KeyCode::Char('c')
@@ -1031,43 +1911,88 @@ fn select_from_list(
                             action_picker = None;
                             continue;
                         }
+                        let picker_path = action_picker.as_ref().and_then(|picker| {
+                            picker.fixed_path.clone().or_else(|| {
+                                selection_path_for_action(
+                                    focus,
+                                    current.as_deref(),
+                                    compositor.active_content_index(),
+                                    &preview_cache,
+                                    current_selection_entry(&entries, &filtered, selected),
+                                )
+                            })
+                        });
+                        let visible_actions = action_picker
+                            .as_ref()
+                            .map(|picker| {
+                                filtered_action_indexes(
+                                    &action_settings.items,
+                                    &picker.query,
+                                    picker_path.as_deref(),
+                                )
+                            })
+                            .unwrap_or_default();
+                        if key.code == KeyCode::Enter
+                            || matches_action_binding(&key, &action_settings.picker_bindings)
+                        {
+                            let Some(picker) = action_picker.as_ref() else {
+                                continue;
+                            };
+                            let close_session =
+                                matches_action_binding(&key, &action_settings.picker_bindings);
+                            let action = visible_actions
+                                .get(picker.selected)
+                                .and_then(|index| action_settings.items.get(*index));
+                            let path = picker_path;
+                            if let Some(outcome) =
+                                resolve_picker_action(action, path.as_deref(), close_session)
+                            {
+                                terminal.show_cursor()?;
+                                return Ok(Some(outcome));
+                            }
+                            continue;
+                        }
                         match key.code {
                             KeyCode::Up | KeyCode::Char('k') => {
                                 if let Some(picker) = action_picker.as_mut() {
                                     picker.selected = previous_picker_index(
                                         picker.selected,
-                                        action_settings.items.len(),
+                                        visible_actions.len(),
                                     );
                                 }
                                 continue;
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 if let Some(picker) = action_picker.as_mut() {
-                                    picker.selected = next_picker_index(
-                                        picker.selected,
-                                        action_settings.items.len(),
-                                    );
+                                    picker.selected =
+                                        next_picker_index(picker.selected, visible_actions.len());
                                 }
                                 continue;
                             }
-                            KeyCode::Enter => {
-                                let Some(picker) = action_picker.as_ref() else {
-                                    continue;
-                                };
-                                let close_session = key.modifiers.contains(KeyModifiers::CONTROL);
-                                let action = action_settings.items.get(picker.selected);
-                                let path = selection_path_for_action(
-                                    focus,
-                                    current.as_deref(),
-                                    compositor.active_content_index(),
-                                    &preview_cache,
-                                    current_selection_entry(&entries, &filtered, selected),
-                                );
-                                if let Some(outcome) =
-                                    resolve_picker_action(action, path.as_deref(), close_session)
-                                {
-                                    terminal.show_cursor()?;
-                                    return Ok(Some(outcome));
+                            KeyCode::Backspace => {
+                                if let Some(picker) = action_picker.as_mut() {
+                                    picker.query.pop();
+                                    let visible_actions = filtered_action_indexes(
+                                        &action_settings.items,
+                                        &picker.query,
+                                        picker_path.as_deref(),
+                                    );
+                                    clamp_picker_selection(picker, visible_actions.len());
+                                }
+                                continue;
+                            }
+                            KeyCode::Char(value)
+                                if key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT =>
+                            {
+                                if let Some(picker) = action_picker.as_mut() {
+                                    picker.query.push(value);
+                                    let visible_actions = filtered_action_indexes(
+                                        &action_settings.items,
+                                        &picker.query,
+                                        picker_path.as_deref(),
+                                    );
+                                    clamp_picker_selection(picker, visible_actions.len());
                                 }
                                 continue;
                             }
@@ -1081,6 +2006,15 @@ fn select_from_list(
                                 .is_some_and(WorktreeOverlay::is_error)
                             {
                                 worktree_overlay = None;
+                            }
+                            continue;
+                        }
+                        if create_overlay.is_some() {
+                            if create_overlay
+                                .as_ref()
+                                .is_some_and(WorktreeOverlay::is_error)
+                            {
+                                create_overlay = None;
                             }
                             continue;
                         }
@@ -1103,13 +2037,38 @@ fn select_from_list(
                         }
                         continue;
                     }
-                    if key.code == KeyCode::Enter
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    if create_overlay.is_some() {
+                        if key.code == KeyCode::Enter
+                            && create_overlay
+                                .as_ref()
+                                .is_some_and(WorktreeOverlay::is_error)
+                        {
+                            create_overlay = None;
+                        }
+                        continue;
+                    }
+                    if matches_create_binding(&key, &create_settings.picker_bindings)
+                        && focus != Focus::TagEdit
+                    {
+                        if !create_settings.items.is_empty() {
+                            stick_to_first_result = false;
+                            create_modal = Some(CreateModal::Picker(CreatePicker {
+                                selected: 0,
+                                query: String::new(),
+                            }));
+                        }
+                        continue;
+                    }
+                    if matches_action_binding(&key, &action_settings.picker_bindings)
                         && focus != Focus::TagEdit
                     {
                         if !action_settings.items.is_empty() {
                             stick_to_first_result = false;
-                            action_picker = Some(ActionPicker { selected: 0 });
+                            action_picker = Some(ActionPicker {
+                                selected: 0,
+                                query: String::new(),
+                                fixed_path: None,
+                            });
                         }
                         continue;
                     }
@@ -1223,10 +2182,14 @@ fn select_from_list(
                             .cloned()
                         {
                             worktree_overlay = Some(WorktreeOverlay::new(
-                                worktree_overlay_title(&entry),
-                                "Starting worktree creation",
+                                branch_overlay_title(&entry, branch_settings.on_select),
+                                branch_overlay_first_message(branch_settings.on_select),
                             ));
-                            start_remote_worktree_creation(entry, worktree_tx.clone());
+                            start_remote_branch_selection(
+                                entry,
+                                branch_settings.on_select,
+                                worktree_tx.clone(),
+                            );
                             continue;
                         }
                         let value = selection_path_for_action(
@@ -1405,30 +2368,54 @@ fn select_from_list(
                         }
                     }
                 }
-                Event::Paste(value) => match focus {
-                    Focus::Search => {
-                        insert_paste(&mut input, &value);
-                        filtered = filter_and_sort_visible(
-                            &entries,
-                            input.value(),
-                            sort_mode,
-                            &meta_cache,
-                            &tag_cache,
-                            show_remote_branches,
-                            pinned_path(
-                                sort_settings.pin_current_project,
-                                current_project_path.as_deref(),
-                            ),
-                        );
-                        selected = 0;
-                        stick_to_first_result = true;
-                        list_offset = 0;
+                Event::Paste(value) => {
+                    if let Some(CreateModal::Form(form)) = create_modal.as_mut() {
+                        if let Some(item) = create_settings.items.get(form.item_index) {
+                            if let Some(input) = form.inputs.get_mut(form.active_prompt) {
+                                insert_paste(input, &value);
+                            }
+                            form.error = None;
+                            update_dependent_create_defaults(
+                                form,
+                                item,
+                                selection_path_for_action(
+                                    focus,
+                                    current.as_deref(),
+                                    compositor.active_content_index(),
+                                    &preview_cache,
+                                    current_selection_entry(&entries, &filtered, selected),
+                                )
+                                .as_deref(),
+                            );
+                            update_create_path_suggestions(form, item);
+                        }
+                        continue;
                     }
-                    Focus::TagEdit => {
-                        insert_paste(&mut tag_input, &value);
+                    match focus {
+                        Focus::Search => {
+                            insert_paste(&mut input, &value);
+                            filtered = filter_and_sort_visible(
+                                &entries,
+                                input.value(),
+                                sort_mode,
+                                &meta_cache,
+                                &tag_cache,
+                                show_remote_branches,
+                                pinned_path(
+                                    sort_settings.pin_current_project,
+                                    current_project_path.as_deref(),
+                                ),
+                            );
+                            selected = 0;
+                            stick_to_first_result = true;
+                            list_offset = 0;
+                        }
+                        Focus::TagEdit => {
+                            insert_paste(&mut tag_input, &value);
+                        }
+                        Focus::Preview | Focus::Detail => {}
                     }
-                    Focus::Preview | Focus::Detail => {}
-                },
+                }
                 Event::Mouse(mouse) => {
                     let col = mouse.column;
                     let row = mouse.row;
@@ -1606,7 +2593,11 @@ fn remote_toggle_state(
     }
 }
 
-fn start_remote_worktree_creation(entry: NavigateEntry, tx: mpsc::Sender<WorktreeProgress>) {
+fn start_remote_branch_selection(
+    entry: NavigateEntry,
+    behavior: BranchSelectBehavior,
+    tx: mpsc::Sender<WorktreeProgress>,
+) {
     thread::spawn(move || {
         let NavigateEntryKind::RemoteBranch {
             remote_branch,
@@ -1619,12 +2610,20 @@ fn start_remote_worktree_creation(entry: NavigateEntry, tx: mpsc::Sender<Worktre
             return;
         };
 
-        let result = git::add_worktree_for_remote_with_progress(
-            Path::new(&bare_path),
-            Path::new(&container_path),
-            &remote_branch,
-            progress_sender(&tx),
-        );
+        let bare = Path::new(&bare_path);
+        let result = match behavior {
+            BranchSelectBehavior::Worktree => git::add_worktree_for_remote_with_progress(
+                bare,
+                Path::new(&container_path),
+                &remote_branch,
+                progress_sender(&tx),
+            ),
+            BranchSelectBehavior::Checkout => git::checkout_remote_branch_with_progress(
+                bare,
+                &remote_branch,
+                progress_sender(&tx),
+            ),
+        };
         match result {
             Ok(path) => {
                 let _ = tx.send(WorktreeProgress::Select(path));
@@ -1658,11 +2657,24 @@ fn progress_sender(tx: &mpsc::Sender<WorktreeProgress>) -> impl FnMut(String) + 
     }
 }
 
-fn worktree_overlay_title(entry: &NavigateEntry) -> String {
+fn branch_overlay_title(entry: &NavigateEntry, behavior: BranchSelectBehavior) -> String {
     if let NavigateEntryKind::RemoteBranch { remote_branch, .. } = &entry.kind {
-        format!("Creating {remote_branch}")
+        match behavior {
+            BranchSelectBehavior::Worktree => format!("Creating {remote_branch}"),
+            BranchSelectBehavior::Checkout => format!("Checking out {remote_branch}"),
+        }
     } else {
-        "Creating worktree".to_string()
+        match behavior {
+            BranchSelectBehavior::Worktree => "Creating worktree".to_string(),
+            BranchSelectBehavior::Checkout => "Checking out branch".to_string(),
+        }
+    }
+}
+
+fn branch_overlay_first_message(behavior: BranchSelectBehavior) -> &'static str {
+    match behavior {
+        BranchSelectBehavior::Worktree => "Starting worktree creation",
+        BranchSelectBehavior::Checkout => "Starting branch checkout",
     }
 }
 
@@ -1777,13 +2789,15 @@ fn render_worktree_overlay(
     frame.render_widget(messages, messages_area);
 }
 
-fn render_action_picker(
-    frame: &mut ratatui::Frame,
-    area: Rect,
-    actions: &[ActionDefinition],
-    selected: usize,
-    colors: ActionPickerColors,
-) {
+fn render_action_picker(frame: &mut ratatui::Frame, area: Rect, render: ActionPickerRender<'_>) {
+    let ActionPickerRender {
+        actions,
+        visible_actions,
+        selected,
+        query,
+        action_binding_label,
+        colors,
+    } = render;
     let content_width = actions
         .iter()
         .map(|action| action.label.chars().count() as u16)
@@ -1791,8 +2805,8 @@ fn render_action_picker(
         .unwrap_or(24)
         .saturating_add(18);
     let width = content_width.clamp(36, 72).min(area.width);
-    let height = (actions.len() as u16)
-        .saturating_add(4)
+    let height = (visible_actions.len() as u16)
+        .saturating_add(5)
         .clamp(8, 18)
         .min(area.height);
     let popup = centered_rect(area, width, height);
@@ -1806,45 +2820,78 @@ fn render_action_picker(
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let footer_height = 1.min(inner.height);
-    let list_height = inner.height.saturating_sub(footer_height);
-    let list_area = Rect {
+    let search_height = 1.min(inner.height);
+    let footer_height = 1.min(inner.height.saturating_sub(search_height));
+    let list_height = inner.height.saturating_sub(search_height + footer_height);
+    let search_area = Rect {
         x: inner.x,
         y: inner.y,
+        width: inner.width,
+        height: search_height,
+    };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(search_height),
         width: inner.width,
         height: list_height,
     };
     let footer_area = Rect {
         x: inner.x,
-        y: inner.y.saturating_add(list_height),
+        y: inner.y.saturating_add(search_height + list_height),
         width: inner.width,
         height: footer_height,
     };
 
-    let selected = selected.min(actions.len().saturating_sub(1));
+    let search = if query.is_empty() {
+        "Search actions...".to_string()
+    } else {
+        format!("Search: {query}")
+    };
+    frame.render_widget(
+        Paragraph::new(search).style(Style::default().fg(if query.is_empty() {
+            colors.muted
+        } else {
+            colors.text
+        })),
+        search_area,
+    );
+
+    let selected = selected.min(visible_actions.len().saturating_sub(1));
     let offset = if selected >= list_height as usize {
         selected + 1 - list_height as usize
     } else {
         0
     };
-    let items = actions
+    let items = visible_actions
         .iter()
         .skip(offset)
         .take(list_height as usize)
         .enumerate()
-        .map(|(visible_index, action)| {
+        .filter_map(|(visible_index, action_index)| {
+            let action = actions.get(*action_index)?;
             let action_index = offset + visible_index;
             let prefix = if action_index == selected {
                 "› "
             } else {
                 "  "
             };
-            ListItem::new(Line::from(vec![
+            let icon = action.icon.as_deref().unwrap_or(" ");
+            Some(ListItem::new(Line::from(vec![
                 Span::styled(prefix, Style::default().fg(colors.warm)),
+                Span::styled(icon.to_string(), Style::default().fg(colors.warm)),
+                Span::raw(" "),
                 Span::styled(action.label.clone(), Style::default().fg(colors.text)),
-            ]))
+            ])))
         })
         .collect::<Vec<ListItem>>();
+    let items = if items.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  No matching actions",
+            Style::default().fg(colors.muted),
+        )))]
+    } else {
+        items
+    };
     let list = List::new(items).highlight_style(
         Style::default()
             .fg(Color::Black)
@@ -1864,7 +2911,7 @@ fn render_action_picker(
         ),
         Span::styled(" run  ", Style::default().fg(colors.muted)),
         Span::styled(
-            "Ctrl+Enter",
+            action_binding_label.to_string(),
             Style::default()
                 .fg(colors.warm)
                 .add_modifier(Modifier::BOLD),
@@ -1879,6 +2926,393 @@ fn render_action_picker(
         Span::styled(" close", Style::default().fg(colors.muted)),
     ]));
     frame.render_widget(footer, footer_area);
+}
+
+fn render_create_picker(frame: &mut ratatui::Frame, area: Rect, render: CreatePickerRender<'_>) {
+    let CreatePickerRender {
+        items,
+        visible_items,
+        selected,
+        query,
+        create_binding_label,
+        colors,
+    } = render;
+    let content_width = items
+        .iter()
+        .map(|item| item.label.chars().count() as u16)
+        .max()
+        .unwrap_or(24)
+        .saturating_add(18);
+    let width = content_width.clamp(36, 72).min(area.width);
+    let height = (visible_items.len() as u16)
+        .saturating_add(5)
+        .clamp(8, 18)
+        .min(area.height);
+    let popup = centered_rect(area, width, height);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Create")
+        .border_style(Style::default().fg(colors.accent))
+        .border_type(BorderType::Rounded);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let search_height = 1.min(inner.height);
+    let footer_height = 1.min(inner.height.saturating_sub(search_height));
+    let list_height = inner.height.saturating_sub(search_height + footer_height);
+    let search_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: search_height,
+    };
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(search_height),
+        width: inner.width,
+        height: list_height,
+    };
+    let footer_area = Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(search_height + list_height),
+        width: inner.width,
+        height: footer_height,
+    };
+
+    let search = if query.is_empty() {
+        "Search create recipes...".to_string()
+    } else {
+        format!("Search: {query}")
+    };
+    frame.render_widget(
+        Paragraph::new(search).style(Style::default().fg(if query.is_empty() {
+            colors.muted
+        } else {
+            colors.text
+        })),
+        search_area,
+    );
+
+    let selected = selected.min(visible_items.len().saturating_sub(1));
+    let offset = if selected >= list_height as usize {
+        selected + 1 - list_height as usize
+    } else {
+        0
+    };
+    let list_items = visible_items
+        .iter()
+        .skip(offset)
+        .take(list_height as usize)
+        .enumerate()
+        .filter_map(|(visible_index, item_index)| {
+            let item = items.get(*item_index)?;
+            let item_index = offset + visible_index;
+            let prefix = if item_index == selected { "› " } else { "  " };
+            let icon = item.icon.as_deref().unwrap_or(" ");
+            Some(ListItem::new(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(colors.warm)),
+                Span::styled(icon.to_string(), Style::default().fg(colors.warm)),
+                Span::raw(" "),
+                Span::styled(item.label.clone(), Style::default().fg(colors.text)),
+            ])))
+        })
+        .collect::<Vec<ListItem>>();
+    let list_items = if list_items.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  No matching create recipes",
+            Style::default().fg(colors.muted),
+        )))]
+    } else {
+        list_items
+    };
+    let list = List::new(list_items).highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(colors.warm)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    state.select(selected.checked_sub(offset));
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" choose  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            create_binding_label.to_string(),
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" open  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" close", Style::default().fg(colors.muted)),
+    ]));
+    frame.render_widget(footer, footer_area);
+}
+
+fn render_create_form(frame: &mut ratatui::Frame, area: Rect, render: CreateFormRender<'_>) {
+    let CreateFormRender { item, form, colors } = render;
+    let active_prompt = item.prompts.get(form.active_prompt);
+    let show_suggestions = active_prompt
+        .is_some_and(|prompt| prompt.kind == CreatePromptKind::Path)
+        && !form.path_suggestions.is_empty();
+    let side_by_side = show_suggestions && area.width >= 92;
+    let width = if side_by_side { 92 } else { 78 }.min(area.width).max(42);
+    let suggestion_rows = if side_by_side {
+        0
+    } else {
+        form.path_suggestions.len().min(6) as u16
+    };
+    let prompt_rows = item.prompts.len().saturating_mul(2) as u16;
+    let height = prompt_rows
+        .saturating_add(suggestion_rows)
+        .saturating_add(5)
+        .min(area.height)
+        .max(10);
+    let popup = centered_rect(area, width, height);
+    frame.render_widget(Clear, popup);
+
+    let title = format!("Create: {}", item.label);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(colors.accent))
+        .border_type(BorderType::Rounded);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let suggestion_width = if side_by_side {
+        inner
+            .width
+            .saturating_mul(36)
+            .saturating_div(100)
+            .clamp(24, 34)
+    } else {
+        0
+    };
+    let form_width = inner.width.saturating_sub(if side_by_side {
+        suggestion_width + 1
+    } else {
+        0
+    });
+    let form_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: form_width,
+        height: inner.height,
+    };
+    let suggestion_area = if side_by_side {
+        Some(Rect {
+            x: inner.x.saturating_add(form_width).saturating_add(1),
+            y: inner.y,
+            width: suggestion_width,
+            height: inner.height,
+        })
+    } else {
+        None
+    };
+
+    let mut lines = Vec::new();
+    let mut cursor_row: Option<usize> = None;
+    if let Some(error) = &form.error {
+        lines.push(Line::from(Span::styled(
+            error.clone(),
+            Style::default().fg(colors.warm),
+        )));
+    } else {
+        lines.push(Line::from(Span::raw("")));
+    }
+    for (index, prompt) in item.prompts.iter().enumerate() {
+        let active = index == form.active_prompt;
+        let kind = match prompt.kind {
+            CreatePromptKind::Text => "text",
+            CreatePromptKind::Path => "path",
+        };
+        let label_style = if active {
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(colors.text)
+        };
+        let value_style = if active {
+            Style::default()
+                .fg(colors.text)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(colors.text)
+        };
+        let marker = if active { ">" } else { " " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker} "), Style::default().fg(colors.warm)),
+            Span::styled(prompt.label.clone(), label_style),
+            Span::styled(format!(" ({kind})"), Style::default().fg(colors.muted)),
+        ]));
+        let value = form.inputs.get(index).map(Input::value).unwrap_or_default();
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("- ", Style::default().fg(colors.muted)),
+            Span::styled(value.to_string(), value_style),
+        ]));
+        if active {
+            cursor_row = Some(create_form_input_row(index));
+        }
+        if active && show_suggestions && !side_by_side {
+            render_create_suggestion_lines(&mut lines, form, colors, 6);
+        }
+    }
+    lines.push(Line::from(Span::raw("")));
+    lines.push(Line::from(vec![
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" run  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Up/Down",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" field  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Right/Left",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" completions  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Tab",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" accept  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "j/k",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" pick  ", Style::default().fg(colors.muted)),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .fg(colors.warm)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" back", Style::default().fg(colors.muted)),
+    ]));
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), form_area);
+    if let Some(area) = suggestion_area {
+        render_create_suggestion_panel(frame, area, form, colors);
+    }
+    let input_row = cursor_row
+        .map(|row| form_area.y.saturating_add(row as u16))
+        .unwrap_or(form_area.y);
+    let cursor_x = form
+        .inputs
+        .get(form.active_prompt)
+        .map(Input::visual_cursor)
+        .unwrap_or(0) as u16;
+    if input_row < form_area.y.saturating_add(form_area.height) {
+        frame.set_cursor_position((
+            form_area.x.saturating_add(4).saturating_add(cursor_x),
+            input_row,
+        ));
+    }
+}
+
+fn render_create_suggestion_lines(
+    lines: &mut Vec<Line<'static>>,
+    form: &CreateForm,
+    colors: ActionPickerColors,
+    limit: usize,
+) {
+    if form.path_suggestions.is_empty() {
+        return;
+    }
+    lines.push(Line::from(Span::styled(
+        "  Path suggestions",
+        Style::default().fg(colors.muted),
+    )));
+    for (index, suggestion) in form.path_suggestions.iter().take(limit).enumerate() {
+        let selected = index == form.selected_suggestion;
+        let focused = form.focus == CreateFormFocus::Completions;
+        let style = if selected {
+            if focused {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(colors.warm)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(colors.warm)
+            }
+        } else if suggestion.is_dir {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.text)
+        };
+        let prefix = if selected { "  > " } else { "    " };
+        lines.push(Line::from(Span::styled(
+            format!("{prefix}{}", suggestion.display),
+            style,
+        )));
+    }
+}
+
+fn render_create_suggestion_panel(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    form: &CreateForm,
+    colors: ActionPickerColors,
+) {
+    let mut lines = vec![Line::from(Span::styled(
+        "Path suggestions",
+        Style::default().fg(colors.muted),
+    ))];
+    let limit = area.height.saturating_sub(1) as usize;
+    for (index, suggestion) in form.path_suggestions.iter().take(limit).enumerate() {
+        let selected = index == form.selected_suggestion;
+        let focused = form.focus == CreateFormFocus::Completions;
+        let style = if selected {
+            if focused {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(colors.warm)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(colors.warm)
+            }
+        } else if suggestion.is_dir {
+            Style::default().fg(colors.accent)
+        } else {
+            Style::default().fg(colors.text)
+        };
+        let prefix = if selected { "> " } else { "  " };
+        lines.push(Line::from(Span::styled(
+            format!("{prefix}{}", suggestion.display),
+            style,
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
 }
 
 fn render_progress_bar(progress: f64, width: usize, fill: Color, empty: Color) -> Line<'static> {
@@ -2219,6 +3653,7 @@ mod tests {
         assert!(labels.contains(&"Open repo online"));
         assert!(labels.contains(&"Open Claude session"));
         assert!(labels.contains(&"Open OpenCode session"));
+        assert!(actions.iter().all(|action| action.icon.is_some()));
     }
 
     #[test]
@@ -2257,9 +3692,195 @@ mod tests {
     }
 
     #[test]
+    fn action_picker_filters_by_search_query() {
+        let actions = model::default_action_definitions();
+        let indexes = filtered_action_indexes(&actions, "code", Some("/tmp"));
+        let labels = indexes
+            .iter()
+            .map(|index| actions[*index].label.as_str())
+            .collect::<Vec<&str>>();
+
+        assert_eq!(labels, vec!["Open VS Code", "Open OpenCode session"]);
+    }
+
+    #[test]
+    fn action_bindings_match_ctrl_enter_and_ctrl_space() {
+        let bindings = model::default_action_picker_bindings();
+        assert!(matches_action_binding(
+            &KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
+            &bindings
+        ));
+        assert!(matches_action_binding(
+            &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL),
+            &bindings
+        ));
+        assert!(!matches_action_binding(
+            &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &bindings
+        ));
+    }
+
+    #[test]
+    fn create_binding_matches_ctrl_n() {
+        let bindings = model::default_create_picker_bindings();
+
+        assert!(matches_create_binding(
+            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            &bindings
+        ));
+        assert!(!matches_create_binding(
+            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+            &bindings
+        ));
+    }
+
+    #[test]
+    fn expands_create_placeholders_and_home_prefix() {
+        let old_home = env::var("HOME").ok();
+        env::set_var("HOME", "/Users/example");
+
+        let expanded = expand_create_value(
+            "~/Github/{name}",
+            Some("selected"),
+            &[("name".to_string(), "repo".to_string())],
+        );
+
+        restore_env_var("HOME", old_home);
+        assert_eq!(expanded, "/Users/example/Github/repo");
+        assert_eq!(
+            expand_create_value(
+                "/tmp/{name}/{path}",
+                Some("selected"),
+                &[("name".to_string(), "repo".to_string())],
+            ),
+            "/tmp/repo/selected"
+        );
+    }
+
+    #[test]
+    fn create_form_collects_all_prompt_values() {
+        let item = CreateDefinition {
+            label: "New".to_string(),
+            icon: None,
+            prompts: vec![
+                model::CreatePrompt {
+                    name: "name".to_string(),
+                    label: "Name".to_string(),
+                    kind: CreatePromptKind::Text,
+                    default: Some("repo".to_string()),
+                    required: true,
+                },
+                model::CreatePrompt {
+                    name: "target".to_string(),
+                    label: "Target".to_string(),
+                    kind: CreatePromptKind::Path,
+                    default: Some("/tmp/{name}".to_string()),
+                    required: true,
+                },
+            ],
+            shell: "true".to_string(),
+            current_dir: None,
+            success_path: "{target}".to_string(),
+        };
+        let mut form = create_form_for_item(0, &item, None);
+
+        assert_eq!(form.inputs[0].value(), "repo");
+        assert_eq!(form.inputs[1].value(), "/tmp/repo");
+        form.active_prompt = 0;
+        form.inputs[0] = Input::new("custom".to_string());
+        form.inputs[1] = Input::new(String::new());
+        update_dependent_create_defaults(&mut form, &item, None);
+
+        let values = collect_create_form_values(&mut form, &item).expect("valid values");
+        assert_eq!(
+            values,
+            vec![
+                ("name".to_string(), "custom".to_string()),
+                ("target".to_string(), "/tmp/custom".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn create_form_cursor_row_tracks_active_value_row() {
+        assert_eq!(create_form_input_row(0), 2);
+        assert_eq!(create_form_input_row(1), 4);
+        assert_eq!(create_form_input_row(2), 6);
+    }
+
+    #[test]
+    fn create_form_drops_completion_focus_when_leaving_path_prompt() {
+        let item = model::default_create_definitions()
+            .into_iter()
+            .find(|item| item.label == "New project")
+            .expect("new project recipe");
+        let mut form = create_form_for_item(0, &item, None);
+        form.active_prompt = 1;
+        update_create_path_suggestions(&mut form, &item);
+        form.focus = CreateFormFocus::Completions;
+
+        move_create_form_prompt(&mut form, &item, false);
+
+        assert_eq!(form.active_prompt, 0);
+        assert!(matches!(form.focus, CreateFormFocus::Fields));
+        assert!(form.path_suggestions.is_empty());
+    }
+
+    #[test]
+    fn path_suggestions_complete_directory_prefixes() {
+        let root = env::temp_dir().join(format!(
+            "navgator-create-suggestions-{}",
+            std::process::id()
+        ));
+        let nested = root.join("alpha");
+        fs::create_dir_all(&nested).expect("create nested dir");
+        fs::write(root.join("alpine.txt"), "test").expect("create file");
+
+        let input = root.join("al").to_string_lossy().to_string();
+        let suggestions = path_suggestions_for_input(&input);
+
+        let _ = fs::remove_dir_all(&root);
+        assert!(suggestions
+            .iter()
+            .any(|suggestion| suggestion.display == "alpha/" && suggestion.is_dir));
+        assert!(suggestions
+            .iter()
+            .any(|suggestion| suggestion.display == "alpine.txt" && !suggestion.is_dir));
+    }
+
+    #[test]
+    fn action_picker_hides_unmet_file_conditions() {
+        let temp =
+            env::temp_dir().join(format!("navgator-action-condition-{}", std::process::id()));
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let mut action = model::default_action_definitions()
+            .into_iter()
+            .find(|action| action.label == "Open GitHub Desktop")
+            .expect("github desktop action");
+
+        assert!(!action_file_condition_matches(
+            &action,
+            Some(&temp.to_string_lossy())
+        ));
+        fs::create_dir_all(temp.join(".git")).expect("create git marker");
+        assert!(action_file_condition_matches(
+            &action,
+            Some(&temp.to_string_lossy())
+        ));
+        action.file_condition = Some("/definitely/missing/navgator-condition".to_string());
+        assert!(!action_file_condition_matches(
+            &action,
+            Some(&temp.to_string_lossy())
+        ));
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn picker_ctrl_enter_marks_action_for_session_close() {
         let action = ActionDefinition {
             label: "Navigate".to_string(),
+            icon: None,
+            file_condition: None,
             kind: ActionKind::Navigate,
         };
 

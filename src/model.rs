@@ -187,7 +187,9 @@ pub(crate) struct BuildItemsResult {
     pub(crate) preview_settings: PreviewSettings,
     pub(crate) sort_settings: SortSettings,
     pub(crate) remote_settings: RemoteSettings,
+    pub(crate) branch_settings: BranchSettings,
     pub(crate) action_settings: ActionSettings,
+    pub(crate) create_settings: CreateSettings,
     pub(crate) theme_colors: ThemeColors,
 }
 
@@ -211,18 +213,67 @@ pub(crate) struct LoadedConfig {
     pub(crate) preview_settings: PreviewSettings,
     pub(crate) sort_settings: SortSettings,
     pub(crate) remote_settings: RemoteSettings,
+    pub(crate) branch_settings: BranchSettings,
     pub(crate) action_settings: ActionSettings,
+    pub(crate) create_settings: CreateSettings,
     pub(crate) theme_colors: ThemeColors,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActionSettings {
     pub(crate) items: Vec<ActionDefinition>,
+    pub(crate) picker_bindings: Vec<ActionBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActionBinding {
+    pub(crate) label: String,
+    pub(crate) key: ActionBindingKey,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ActionBindingKey {
+    CtrlEnter,
+    CtrlSpace,
+    CtrlN,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CreateSettings {
+    pub(crate) items: Vec<CreateDefinition>,
+    pub(crate) picker_bindings: Vec<ActionBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CreateDefinition {
+    pub(crate) label: String,
+    pub(crate) icon: Option<String>,
+    pub(crate) prompts: Vec<CreatePrompt>,
+    pub(crate) shell: String,
+    pub(crate) current_dir: Option<String>,
+    pub(crate) success_path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CreatePrompt {
+    pub(crate) name: String,
+    pub(crate) label: String,
+    pub(crate) kind: CreatePromptKind,
+    pub(crate) default: Option<String>,
+    pub(crate) required: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CreatePromptKind {
+    Text,
+    Path,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActionDefinition {
     pub(crate) label: String,
+    pub(crate) icon: Option<String>,
+    pub(crate) file_condition: Option<String>,
     pub(crate) kind: ActionKind,
 }
 
@@ -243,18 +294,52 @@ impl Default for ActionSettings {
     fn default() -> Self {
         Self {
             items: default_action_definitions(),
+            picker_bindings: default_action_picker_bindings(),
         }
     }
+}
+
+impl Default for CreateSettings {
+    fn default() -> Self {
+        Self {
+            items: default_create_definitions(),
+            picker_bindings: default_create_picker_bindings(),
+        }
+    }
+}
+
+pub(crate) fn default_action_picker_bindings() -> Vec<ActionBinding> {
+    vec![
+        ActionBinding {
+            label: "Ctrl+Enter".to_string(),
+            key: ActionBindingKey::CtrlEnter,
+        },
+        ActionBinding {
+            label: "Ctrl+Space".to_string(),
+            key: ActionBindingKey::CtrlSpace,
+        },
+    ]
+}
+
+pub(crate) fn default_create_picker_bindings() -> Vec<ActionBinding> {
+    vec![ActionBinding {
+        label: "Ctrl+N".to_string(),
+        key: ActionBindingKey::CtrlN,
+    }]
 }
 
 pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
     vec![
         ActionDefinition {
             label: "Navigate to".to_string(),
+            icon: Some("󰁔".to_string()),
+            file_condition: None,
             kind: ActionKind::Navigate,
         },
         ActionDefinition {
             label: "Open GitHub Desktop".to_string(),
+            icon: Some("󰊢".to_string()),
+            file_condition: Some(".git".to_string()),
             kind: ActionKind::Command {
                 command: "open".to_string(),
                 args: vec![
@@ -267,6 +352,8 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
         },
         ActionDefinition {
             label: "Open VS Code".to_string(),
+            icon: Some("󰨞".to_string()),
+            file_condition: None,
             kind: ActionKind::Command {
                 command: "open".to_string(),
                 args: vec![
@@ -279,6 +366,8 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
         },
         ActionDefinition {
             label: "Open IntelliJ".to_string(),
+            icon: Some("".to_string()),
+            file_condition: None,
             kind: ActionKind::Command {
                 command: "idea".to_string(),
                 args: vec![".".to_string()],
@@ -287,12 +376,16 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
         },
         ActionDefinition {
             label: "Open repo online".to_string(),
+            icon: Some("󰖟".to_string()),
+            file_condition: Some(".git".to_string()),
             kind: ActionKind::OpenUrl {
                 url: "{github_url}".to_string(),
             },
         },
         ActionDefinition {
             label: "Open Claude session".to_string(),
+            icon: Some("󰚩".to_string()),
+            file_condition: None,
             kind: ActionKind::Command {
                 command: "claude".to_string(),
                 args: Vec::new(),
@@ -301,11 +394,71 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
         },
         ActionDefinition {
             label: "Open OpenCode session".to_string(),
+            icon: Some("󰘦".to_string()),
+            file_condition: None,
             kind: ActionKind::Command {
                 command: "opencode".to_string(),
                 args: Vec::new(),
                 current_dir: Some("{path}".to_string()),
             },
+        },
+    ]
+}
+
+pub(crate) fn default_create_definitions() -> Vec<CreateDefinition> {
+    vec![
+        CreateDefinition {
+            label: "New project".to_string(),
+            icon: Some("󰉋".to_string()),
+            prompts: vec![
+                CreatePrompt {
+                    name: "name".to_string(),
+                    label: "Project name".to_string(),
+                    kind: CreatePromptKind::Text,
+                    default: None,
+                    required: true,
+                },
+                CreatePrompt {
+                    name: "parent".to_string(),
+                    label: "Parent folder".to_string(),
+                    kind: CreatePromptKind::Path,
+                    default: Some("~/Github".to_string()),
+                    required: true,
+                },
+            ],
+            shell: "mkdir -p \"$NAVGATOR_CREATE_PARENT/$NAVGATOR_CREATE_NAME\"".to_string(),
+            current_dir: None,
+            success_path: "{parent}/{name}".to_string(),
+        },
+        CreateDefinition {
+            label: "New branch + worktree".to_string(),
+            icon: Some("".to_string()),
+            prompts: vec![
+                CreatePrompt {
+                    name: "branch".to_string(),
+                    label: "Branch name".to_string(),
+                    kind: CreatePromptKind::Text,
+                    default: None,
+                    required: true,
+                },
+                CreatePrompt {
+                    name: "base".to_string(),
+                    label: "Base branch".to_string(),
+                    kind: CreatePromptKind::Text,
+                    default: Some("main".to_string()),
+                    required: true,
+                },
+                CreatePrompt {
+                    name: "target".to_string(),
+                    label: "Worktree path".to_string(),
+                    kind: CreatePromptKind::Path,
+                    default: Some("../{branch}".to_string()),
+                    required: true,
+                },
+            ],
+            shell: "git worktree add -b \"$NAVGATOR_CREATE_BRANCH\" \"$NAVGATOR_CREATE_TARGET\" \"$NAVGATOR_CREATE_BASE\"".to_string(),
+            current_dir: Some("{path}".to_string()),
+            success_path: "{target}".to_string(),
         },
     ]
 }
@@ -363,12 +516,31 @@ pub(crate) struct RemoteSettings {
     pub(crate) use_cache: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BranchSettings {
+    pub(crate) on_select: BranchSelectBehavior,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BranchSelectBehavior {
+    Worktree,
+    Checkout,
+}
+
 impl Default for RemoteSettings {
     fn default() -> Self {
         Self {
             enabled_by_default: false,
             refresh_on_toggle: true,
             use_cache: true,
+        }
+    }
+}
+
+impl Default for BranchSettings {
+    fn default() -> Self {
+        Self {
+            on_select: BranchSelectBehavior::Worktree,
         }
     }
 }
@@ -428,7 +600,7 @@ pub(crate) enum Focus {
     TagEdit,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct HelpContext {
     pub(crate) focus: Focus,
     pub(crate) sort_mode: SortMode,
@@ -444,6 +616,8 @@ pub(crate) struct HelpContext {
     pub(crate) detail_tab_index: usize,
     pub(crate) detail_tab_count: usize,
     pub(crate) detail_scroll: usize,
+    pub(crate) action_binding_label: String,
+    pub(crate) create_binding_label: String,
 }
 
 #[derive(Clone, Copy)]

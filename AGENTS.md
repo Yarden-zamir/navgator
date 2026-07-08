@@ -5,4 +5,5 @@
 - Generic terminal/tooling helpers should stay in `gator`.
 - Regenerate `config-schema.json` after config struct changes with `cargo run -- config-schema > config-schema.json`.
 - When asked to build this repo, default to `cargo build --release` unless a debug build is explicitly requested.
+- After making code or config-schema-affecting changes, always run `cargo build --release` before handing off.
 - Verify with `cargo fmt -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test`.

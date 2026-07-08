@@ -17,6 +17,8 @@
 - Schema commands do not insert `$schema` into config files.
 - `navgator navigate` loads config before building the result list.
 - `navgator` without arguments behaves like `navgator navigate`.
+- `navgator actions` loads config and opens directly to the action picker for the first result.
+- `navgator actions <path>` loads config and opens directly to the action picker for the provided path.
 
 ## Discovery
 
@@ -70,6 +72,9 @@
 - Runtime action defaults are the built-in action list.
 - Runtime action defaults are used when no `[actions]` table is configured.
 - Runtime action defaults are used when action configuration produces no valid action items.
+- Runtime create defaults are the built-in create recipe list.
+- Runtime create defaults are used when no `[create]` table is configured.
+- Runtime create defaults are used when create configuration produces no valid create items.
 
 ## Written Defaults
 
@@ -82,9 +87,12 @@
 - Written defaults must include `[ui]` with explicit runtime-equivalent values.
 - Written defaults must include `[preview]` with explicit runtime-equivalent values.
 - Written defaults must include `[actions]`.
-- Written defaults must set `actions.defaults = false`.
+- Written defaults must omit action default toggles because listed actions replace built-ins by default.
 - Written defaults must write every built-in action as an explicit `[[actions.items]]` entry.
 - Written default actions must be behaviorally equivalent to runtime action defaults.
+- Written defaults must include `[create]`.
+- Written defaults must write every built-in create recipe as an explicit `[[create.items]]` entry.
+- Written default create recipes must be behaviorally equivalent to runtime create defaults.
 - Written default actions are intended to be edited in place by users.
 - Runtime defaults and written defaults may share source data, but they are different concepts.
 
@@ -101,12 +109,19 @@
 
 ## Actions
 
-- `[actions].defaults` controls whether built-in actions are included before listed actions.
-- `[actions].defaults` defaults to true when omitted.
-- `defaults = true` prepends the built-in action list.
-- `defaults = false` uses only valid listed actions.
-- If `defaults = false` and every listed action is invalid, navgator falls back to built-in actions.
+- Listed `actions.items` replace built-in actions by default.
+- `[actions].include_defaults = true` prepends the built-in action list before listed actions.
+- When `[actions]` has no valid listed action items, navgator falls back to built-in actions.
+- `[actions].bindings` controls the key bindings that open the action picker and run+close inside it.
+- `[actions].bindings` defaults to `ctrl-enter` and `ctrl-space` when omitted or invalid.
+- The UI shows only the first configured action picker binding.
 - Empty action labels are ignored.
+- Action icons are optional.
+- Action icons may use Nerd Font glyphs or emoji.
+- Action file_condition values are optional.
+- Relative action file_condition values are checked under the selected target path.
+- Absolute action file_condition values are checked as absolute paths.
+- Actions with unmet file_condition are hidden from the picker.
 - Command actions require a non-empty `command`.
 - Open URL actions require a non-empty `url`.
 - Navigate actions do not require additional fields.
@@ -116,6 +131,49 @@
 - `{path}` expands to the resolved selected path when an action runs.
 - `{github_url}` expands to the selected repository GitHub URL when available.
 - Actions requiring an unavailable placeholder do not run.
+
+## Branches
+
+- `[branches].on_select` controls what happens when a remote branch result is selected.
+- `[branches].on_select` defaults to `worktree`.
+- `worktree` creates or reuses a worktree for the selected remote branch and navigates to it.
+- `checkout` fetches/prepares the selected remote branch, checks it out in an existing worktree for the selected bare repo, and navigates to that worktree.
+- `checkout` does not create a new working tree.
+- `checkout` fails with a clear error when no existing worktree is available.
+- Both branch selection modes share the same remote ref preparation behavior.
+
+## Create
+
+- Listed `create.items` replace built-in create recipes by default.
+- `[create].include_defaults = true` prepends the built-in create recipe list before listed recipes.
+- When `[create]` has no valid listed recipes, navgator falls back to built-in create recipes.
+- `[create].bindings` controls the key bindings that open the create picker.
+- `[create].bindings` defaults to `ctrl-n` when omitted or invalid.
+- The UI shows only the first configured create picker binding.
+- Create recipe labels must be non-empty.
+- Create recipe shell values must be non-empty.
+- Create recipe `success_path` values must be non-empty.
+- Create recipes run arbitrary shell through the platform shell.
+- Create recipe prompt values are exposed to shell as `NAVGATOR_CREATE_*` environment variables.
+- The selected navgator target is exposed to shell as `NAVGATOR_SELECTED_PATH` when available.
+- Prompt names may contain ASCII letters, numbers, underscore, or dash.
+- Prompt names with dash are normalized to underscore for placeholders and environment variables.
+- Prompt names must be unique per recipe after normalization; later duplicates are ignored.
+- Prompt types are `text` and `path`.
+- Prompt type defaults to `text`.
+- Path prompts represent filesystem paths. Recipes that create a child folder should prefer a parent-folder path prompt plus a text name prompt over one ambiguous full path prompt.
+- Path prompts support non-recursive filesystem autocomplete.
+- `Tab` accepts the selected path suggestion.
+- `Right` focuses path suggestions when available.
+- `Left` returns focus to prompt fields.
+- `j`, `k`, `Up`, and `Down` move through path suggestions while suggestions are focused.
+- `Up` and `Down` move through prompt fields while fields are focused.
+- Required prompts reject empty values.
+- Prompt defaults support earlier prompt placeholders and `{path}`.
+- Create recipe `current_dir` supports prompt placeholders and `{path}`.
+- Create recipe `success_path` supports prompt placeholders and `{path}`.
+- After shell success, navgator navigates to the expanded `success_path`.
+- If the expanded `success_path` does not exist after shell success, navgator shows an error instead of navigating.
 
 ## Schema Behavior
 
@@ -129,15 +187,19 @@
 - Schema generation must be regenerated after config structs change.
 - The generated schema must include all public config sections.
 - The generated schema must include all action item variants.
+- The generated schema must include branch selection behavior.
+- The generated schema must include create settings and prompt types.
 
 ## Documentation
 
 - README must mention `navgator config-schema`.
 - README must document the zsh wrapper relationship with `GATOR_OUTPUT`.
-- README must document `Ctrl+Enter` actions.
+- README must document action picker bindings.
 - README must document the difference between runtime defaults and written defaults.
-- README must document `actions.defaults`.
+- README must document `actions.include_defaults`.
 - README must document `{path}` and `{github_url}` placeholders.
+- README must document branch selection behavior.
+- README must document create recipes, prompt types, path autocomplete, environment variables, and automatic success navigation.
 - Detailed config behavior belongs in this spec.
 - Feature-specific action behavior belongs in the action picker spec.
 

@@ -15,10 +15,34 @@
     },
     "actions": {
       "title": "Actions",
-      "description": "Ctrl+Enter action picker settings.",
+      "description": "Action picker settings.",
       "anyOf": [
         {
           "$ref": "#/definitions/ConfigActions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "branches": {
+      "title": "Branches",
+      "description": "Behavior when selecting remote branch results.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigBranches"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "create": {
+      "title": "Create",
+      "description": "Create picker settings for prompted shell recipes. Use {path} for the selected path and {prompt_name} for prompt values.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigCreate"
         },
         {
           "type": "null"
@@ -172,6 +196,24 @@
         "label"
       ],
       "properties": {
+        "file_condition": {
+          "title": "File Condition",
+          "description": "Optional file or directory path that must exist under the selected target path for the action to be shown.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "title": "Icon",
+          "description": "Optional icon text shown before the label. Nerd Font glyphs and emoji are supported.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "label": {
           "title": "Label",
           "description": "Text shown in the action picker.",
@@ -181,12 +223,21 @@
     },
     "ConfigActions": {
       "title": "Action Settings",
-      "description": "Actions shown by the Ctrl+Enter picker. Set defaults = false to replace the built-in actions. Use {path} for the selected path and {github_url} for the selected repo's GitHub URL.",
+      "description": "Actions shown by the action picker. When items are listed, they replace built-ins unless include_defaults is true. Use {path} for the selected path and {github_url} for the selected repo's GitHub URL.",
       "type": "object",
       "properties": {
-        "defaults": {
+        "bindings": {
+          "title": "Picker Bindings",
+          "description": "Key bindings that open the action picker and run+close inside it. Supported values: ctrl-enter, ctrl-space. The UI shows only the first valid binding.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_defaults": {
           "title": "Include Default Actions",
-          "description": "When true, built-in actions are included before custom items. Defaults to true.",
+          "description": "When true, built-in actions are included before listed items. Defaults to false when items are present.",
           "default": null,
           "type": [
             "boolean",
@@ -195,13 +246,183 @@
         },
         "items": {
           "title": "Items",
-          "description": "Custom actions appended to the picker.",
+          "description": "Actions shown in the picker. When present, these replace built-ins unless include_defaults is true.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/ConfigAction"
           }
         }
       }
+    },
+    "ConfigBranchSelectBehavior": {
+      "type": "string",
+      "enum": [
+        "worktree",
+        "checkout"
+      ]
+    },
+    "ConfigBranches": {
+      "title": "Branch Settings",
+      "description": "Settings for what navgator does when a remote branch result is selected.",
+      "type": "object",
+      "properties": {
+        "on_select": {
+          "title": "On Select",
+          "description": "Remote branch selection behavior. worktree creates/reuses a worktree. checkout checks the branch out in an existing worktree. Defaults to worktree.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigBranchSelectBehavior"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ConfigCreate": {
+      "title": "Create Settings",
+      "description": "Create recipes shown by the create picker. Recipes collect prompt values, run shell, and navigate to success_path when the shell succeeds.",
+      "type": "object",
+      "properties": {
+        "bindings": {
+          "title": "Create Picker Bindings",
+          "description": "Key bindings that open the create picker. Supported values: ctrl-n. The UI shows only the first valid binding.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include_defaults": {
+          "title": "Include Default Create Recipes",
+          "description": "When true, built-in create recipes are included before listed items. Defaults to false when items are present.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "items": {
+          "title": "Create Items",
+          "description": "Create recipes shown in the picker. When present, these replace built-ins unless include_defaults is true.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConfigCreateItem"
+          }
+        }
+      }
+    },
+    "ConfigCreateItem": {
+      "title": "Create Item",
+      "description": "One prompted shell create recipe.",
+      "type": "object",
+      "required": [
+        "label",
+        "shell",
+        "success_path"
+      ],
+      "properties": {
+        "current_dir": {
+          "title": "Current Directory",
+          "description": "Optional command working directory. Supports {path} and prompt placeholders.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "title": "Icon",
+          "description": "Optional icon text shown before the label. Nerd Font glyphs and emoji are supported.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "title": "Label",
+          "description": "Text shown in the create picker.",
+          "type": "string"
+        },
+        "prompts": {
+          "title": "Prompts",
+          "description": "Input prompts collected before running the shell recipe.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConfigCreatePrompt"
+          }
+        },
+        "shell": {
+          "title": "Shell",
+          "description": "Shell script executed after prompts are collected. Prompt values are exposed as NAVGATOR_CREATE_* environment variables.",
+          "type": "string"
+        },
+        "success_path": {
+          "title": "Success Path",
+          "description": "Path to navigate to after shell success. Supports {path} and prompt placeholders.",
+          "type": "string"
+        }
+      }
+    },
+    "ConfigCreatePrompt": {
+      "title": "Create Prompt",
+      "description": "One prompt in a create recipe.",
+      "type": "object",
+      "required": [
+        "label",
+        "name"
+      ],
+      "properties": {
+        "default": {
+          "title": "Default",
+          "description": "Optional default value. Supports earlier prompt placeholders and {path}.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "title": "Label",
+          "description": "Text shown next to the input.",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "description": "Prompt placeholder name. Use ASCII letters, numbers, underscore, or dash.",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "description": "When true, empty values are rejected. Defaults to false.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "type": {
+          "title": "Type",
+          "description": "Prompt input type. Defaults to text.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCreatePromptKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ConfigCreatePromptKind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "path"
+      ]
     },
     "ConfigPaths": {
       "title": "Path Settings",

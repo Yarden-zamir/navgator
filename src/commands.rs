@@ -1,5 +1,11 @@
 use std::{path::Path, process::Command};
 
+pub(crate) struct ShellRecipeResult {
+    pub(crate) status: String,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
 pub(crate) fn run_command_output(
     program: &str,
     args: &[String],
@@ -77,6 +83,57 @@ pub(crate) fn run_interactive_command(
     } else {
         Err(format!("{program} exited with {status}"))
     }
+}
+
+pub(crate) fn run_shell_recipe(
+    shell: &str,
+    current_dir: Option<&Path>,
+    envs: &[(String, String)],
+) -> Result<ShellRecipeResult, String> {
+    let mut cmd = shell_command(shell);
+    if let Some(dir) = current_dir {
+        cmd.current_dir(dir);
+    }
+    for (name, value) in envs {
+        cmd.env(name, value);
+    }
+    let output = cmd
+        .env("NO_COLOR", "1")
+        .output()
+        .map_err(|err| format!("failed to run shell recipe: {err}"))?;
+    let result = ShellRecipeResult {
+        status: output.status.to_string(),
+        stdout: String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr)
+            .trim_end()
+            .to_string(),
+    };
+    if output.status.success() {
+        Ok(result)
+    } else if result.stderr.is_empty() {
+        Err(format!("shell recipe exited with {}", result.status))
+    } else {
+        Err(format!(
+            "shell recipe exited with {}: {}",
+            result.status, result.stderr
+        ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn shell_command(shell: &str) -> Command {
+    let mut command = Command::new("cmd");
+    command.args(["/C", shell]);
+    command
+}
+
+#[cfg(not(target_os = "windows"))]
+fn shell_command(shell: &str) -> Command {
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(shell);
+    command
 }
 
 pub(crate) fn open_url(url: &str) -> Result<(), String> {
