@@ -25,6 +25,14 @@ navgator actions
 navgator actions ~/Github/navgator/main
 ```
 
+Open directly to create flows from the current directory:
+
+```sh
+navgator create
+navgator create new-project
+navgator create new-branch-worktree ~/Github/navgator/main
+```
+
 Print the JSON config schema:
 
 ```sh
@@ -38,6 +46,7 @@ Config behavior, discovery order, runtime defaults, written defaults, and schema
 ```sh
 source "$(brew --prefix)/share/navgator/navgator.zsh"
 bindkey '^T' navigate
+bindkey '^N' navgator-create-new-project
 ```
 
 The wrapper writes selections through `GATOR_OUTPUT`; otherwise `navgator` prints the selected path to stdout.
@@ -106,6 +115,8 @@ required = true
 ```
 
 Prompt types are `text` and `path`. Path prompts represent filesystem paths; for new projects, use a parent-folder prompt plus the project name for clearer shell and success paths. `Up`/`Down` move between fields. Press `Right` to focus completions, `Left` to return to fields, `j`/`k` or arrows to move focused completions, and `Tab` to accept. Prompt values expand in `current_dir` and `success_path` as `{prompt_name}`; `{path}` expands to the currently selected navgator target. Shell recipes receive prompt values as environment variables like `NAVGATOR_CREATE_PARENT` and the selected target as `NAVGATOR_SELECTED_PATH`.
+
+Terminal launch selectors match recipe labels directly or by slug, so `New project` can be launched with `navgator create new-project`. When no path is provided, create launches use the current directory as the selected path for `{path}` and `NAVGATOR_SELECTED_PATH`.
 
 ## Build
 

@@ -25,16 +25,16 @@ _navgator_bin() {
   return 1
 }
 
-navigate() {
+_navgator_widget() {
   local bin dir tmp exit_status close_session
   local -a output_lines
   bin="$(_navgator_bin)" || { echo "navgator binary not found" >&2; return 127; }
   tmp="$(mktemp -t navgator.XXXXXX)" || return 1
   [[ -n "$ZLE" ]] && zle -I
   if command -v script >/dev/null 2>&1; then
-    NAVGATOR_OUTPUT_PROTOCOL=2 GATOR_OUTPUT="$tmp" script -q /dev/null "$bin" navigate </dev/tty >/dev/tty 2>/dev/tty
+    NAVGATOR_OUTPUT_PROTOCOL=2 GATOR_OUTPUT="$tmp" script -q /dev/null "$bin" "$@" </dev/tty >/dev/tty 2>/dev/tty
   else
-    NAVGATOR_OUTPUT_PROTOCOL=2 GATOR_OUTPUT="$tmp" "$bin" navigate </dev/tty >/dev/tty 2>/dev/tty
+    NAVGATOR_OUTPUT_PROTOCOL=2 GATOR_OUTPUT="$tmp" "$bin" "$@" </dev/tty >/dev/tty 2>/dev/tty
   fi
   exit_status=$?
   if [[ $exit_status -ne 0 ]]; then
@@ -61,4 +61,18 @@ navigate() {
   fi
 }
 
+navigate() {
+  _navgator_widget navigate
+}
+
+navgator-create() {
+  _navgator_widget create "$PWD"
+}
+
+navgator-create-new-project() {
+  _navgator_widget create new-project "$PWD"
+}
+
 zle -N navigate
+zle -N navgator-create
+zle -N navgator-create-new-project

@@ -66,16 +66,20 @@ fn main() -> AppResult<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() || args[0] == "navigate" {
         ensure_tty_stdin()?;
-        return run_navigate(ActionLaunch::None);
+        return run_navigate(InitialLaunch::Navigate);
     }
     if args[0] == "actions" || args[0] == "action-picker" {
         ensure_tty_stdin()?;
         let launch = if let Some(path) = args.get(1) {
-            ActionLaunch::Path(PathBuf::from(path))
+            InitialLaunch::ActionsPath(PathBuf::from(path))
         } else {
-            ActionLaunch::FirstResult
+            InitialLaunch::ActionsFirstResult
         };
         return run_navigate(launch);
+    }
+    if args[0] == "create" || args[0] == "new" {
+        ensure_tty_stdin()?;
+        return run_navigate(create_launch_from_args(&args[1..], &env::current_dir()?));
     }
     if args[0] == "config-schema" || args[0] == "schema" {
         return print_config_schema();
@@ -91,7 +95,7 @@ fn main() -> AppResult<()> {
 }
 
 fn print_usage() {
-    eprintln!("Usage:\n  navgator [navigate|actions [path]|config-schema]");
+    eprintln!("Usage:\n  navgator [navigate|actions [path]|create [recipe] [path]|config-schema]");
 }
 
 fn print_config_schema() -> AppResult<()> {
@@ -141,13 +145,35 @@ impl WorktreeOverlay {
     }
 }
 
-enum ActionLaunch {
-    None,
-    FirstResult,
-    Path(PathBuf),
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum InitialLaunch {
+    Navigate,
+    ActionsFirstResult,
+    ActionsPath(PathBuf),
+    CreatePicker { path: PathBuf },
+    CreateRecipe { selector: String, path: PathBuf },
 }
 
-fn run_navigate(action_launch: ActionLaunch) -> AppResult<()> {
+fn create_launch_from_args(args: &[String], cwd: &Path) -> InitialLaunch {
+    match args {
+        [] => InitialLaunch::CreatePicker {
+            path: cwd.to_path_buf(),
+        },
+        [path] if Path::new(path).exists() => InitialLaunch::CreatePicker {
+            path: PathBuf::from(path),
+        },
+        [selector] => InitialLaunch::CreateRecipe {
+            selector: selector.clone(),
+            path: cwd.to_path_buf(),
+        },
+        [selector, path, ..] => InitialLaunch::CreateRecipe {
+            selector: selector.clone(),
+            path: PathBuf::from(path),
+        },
+    }
+}
+
+fn run_navigate(initial_launch: InitialLaunch) -> AppResult<()> {
     let result = build_items()?;
     match select_from_list(SelectListArgs {
         entries: result.entries,
@@ -158,7 +184,7 @@ fn run_navigate(action_launch: ActionLaunch) -> AppResult<()> {
         action_settings: result.action_settings,
         create_settings: result.create_settings,
         theme_colors: result.theme_colors,
-        action_launch,
+        initial_launch,
     })? {
         Some(NavigateOutcome::Navigate {
             path,
@@ -200,7 +226,7 @@ struct SelectListArgs {
     action_settings: ActionSettings,
     create_settings: CreateSettings,
     theme_colors: ThemeColors,
-    action_launch: ActionLaunch,
+    initial_launch: InitialLaunch,
 }
 
 enum ResolvedAction {
@@ -238,12 +264,14 @@ struct ActionPickerRender<'a> {
 struct CreatePicker {
     selected: usize,
     query: String,
+    fixed_path: Option<String>,
 }
 
 struct CreateForm {
     item_index: usize,
     active_prompt: usize,
     focus: CreateFormFocus,
+    fixed_path: Option<String>,
     inputs: Vec<Input>,
     path_suggestions: Vec<PathSuggestion>,
     selected_suggestion: usize,
@@ -535,10 +563,81 @@ fn clamp_create_picker_selection(picker: &mut CreatePicker, visible_len: usize) 
     }
 }
 
+fn initial_create_modal(
+    launch: &InitialLaunch,
+    items: &[CreateDefinition],
+    fallback_path: Option<&str>,
+) -> Option<CreateModal> {
+    match launch {
+        InitialLaunch::CreatePicker { path } => Some(CreateModal::Picker(CreatePicker {
+            selected: 0,
+            query: String::new(),
+            fixed_path: Some(path.to_string_lossy().to_string()),
+        })),
+        InitialLaunch::CreateRecipe { selector, path } => {
+            let fixed_path = Some(path.to_string_lossy().to_string());
+            if let Some(item_index) = create_recipe_index(items, selector) {
+                items.get(item_index).map(|item| {
+                    let selected_path = fixed_path.clone();
+                    CreateModal::Form(create_form_for_item(
+                        item_index,
+                        item,
+                        selected_path.as_deref().or(fallback_path),
+                        fixed_path,
+                    ))
+                })
+            } else {
+                Some(CreateModal::Picker(CreatePicker {
+                    selected: 0,
+                    query: selector.clone(),
+                    fixed_path,
+                }))
+            }
+        }
+        InitialLaunch::Navigate
+        | InitialLaunch::ActionsFirstResult
+        | InitialLaunch::ActionsPath(_) => None,
+    }
+}
+
+fn create_recipe_index(items: &[CreateDefinition], selector: &str) -> Option<usize> {
+    let normalized_selector = create_recipe_selector(selector);
+    items.iter().position(|item| {
+        item.label.eq_ignore_ascii_case(selector)
+            || create_recipe_selector(&item.label) == normalized_selector
+    })
+}
+
+fn create_recipe_selector(value: &str) -> String {
+    let mut selector = String::new();
+    let mut pending_dash = false;
+    for ch in value.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() {
+            if pending_dash && !selector.is_empty() {
+                selector.push('-');
+            }
+            selector.push(ch);
+            pending_dash = false;
+        } else {
+            pending_dash = true;
+        }
+    }
+    selector
+}
+
+fn create_modal_fixed_path(modal: Option<&CreateModal>) -> Option<String> {
+    match modal {
+        Some(CreateModal::Picker(picker)) => picker.fixed_path.clone(),
+        Some(CreateModal::Form(form)) => form.fixed_path.clone(),
+        None => None,
+    }
+}
+
 fn create_form_for_item(
     item_index: usize,
     item: &CreateDefinition,
     selected_path: Option<&str>,
+    fixed_path: Option<String>,
 ) -> CreateForm {
     let mut values = Vec::new();
     let inputs = item
@@ -568,6 +667,7 @@ fn create_form_for_item(
         item_index,
         active_prompt: 0,
         focus: CreateFormFocus::Fields,
+        fixed_path,
         inputs,
         path_suggestions,
         selected_suggestion: 0,
@@ -888,12 +988,20 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
         action_settings,
         create_settings,
         theme_colors,
-        action_launch,
+        initial_launch,
     } = args;
-    let action_launch = match action_launch {
-        ActionLaunch::Path(path) if entries.is_empty() => {
+    let initial_launch = match initial_launch {
+        InitialLaunch::ActionsPath(path) if entries.is_empty() => {
             entries.push(action_path_entry(&path));
-            ActionLaunch::Path(path)
+            InitialLaunch::ActionsPath(path)
+        }
+        InitialLaunch::CreatePicker { path } if entries.is_empty() => {
+            entries.push(action_path_entry(&path));
+            InitialLaunch::CreatePicker { path }
+        }
+        InitialLaunch::CreateRecipe { selector, path } if entries.is_empty() => {
+            entries.push(action_path_entry(&path));
+            InitialLaunch::CreateRecipe { selector, path }
         }
         other => other,
     };
@@ -969,19 +1077,25 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
     let mut tag_suggestions: Vec<String> = Vec::new();
     let mut worktree_overlay: Option<WorktreeOverlay> = None;
     let mut create_overlay: Option<WorktreeOverlay> = None;
-    let mut create_modal: Option<CreateModal> = None;
-    let mut action_picker: Option<ActionPicker> = match action_launch {
-        ActionLaunch::None => None,
-        ActionLaunch::FirstResult => Some(ActionPicker {
+    let mut create_modal: Option<CreateModal> = initial_create_modal(
+        &initial_launch,
+        &create_settings.items,
+        current_project_path.as_deref(),
+    );
+    let mut action_picker: Option<ActionPicker> = match &initial_launch {
+        InitialLaunch::ActionsFirstResult => Some(ActionPicker {
             selected: 0,
             query: String::new(),
             fixed_path: None,
         }),
-        ActionLaunch::Path(path) => Some(ActionPicker {
+        InitialLaunch::ActionsPath(path) => Some(ActionPicker {
             selected: 0,
             query: String::new(),
             fixed_path: Some(path.to_string_lossy().to_string()),
         }),
+        InitialLaunch::Navigate
+        | InitialLaunch::CreatePicker { .. }
+        | InitialLaunch::CreateRecipe { .. } => None,
     };
     spawn_worktree_result_provider(&entries, result_tx.clone());
     if show_remote_branches {
@@ -1685,13 +1799,16 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
             match event::read()? {
                 Event::Key(key) => {
                     if create_modal.is_some() {
-                        let selected_path = selection_path_for_action(
-                            focus,
-                            current.as_deref(),
-                            compositor.active_content_index(),
-                            &preview_cache,
-                            current_selection_entry(&entries, &filtered, selected),
-                        );
+                        let selected_path =
+                            create_modal_fixed_path(create_modal.as_ref()).or_else(|| {
+                                selection_path_for_action(
+                                    focus,
+                                    current.as_deref(),
+                                    compositor.active_content_index(),
+                                    &preview_cache,
+                                    current_selection_entry(&entries, &filtered, selected),
+                                )
+                            });
                         let mut close_modal = false;
                         let mut start_create: Option<(CreateDefinition, Vec<(String, String)>)> =
                             None;
@@ -1725,6 +1842,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                                     item_index,
                                                                     item,
                                                                     selected_path.as_deref(),
+                                                                    picker.fixed_path.clone(),
                                                                 ),
                                                             );
                                                         }
@@ -1778,6 +1896,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                             *modal = CreateModal::Picker(CreatePicker {
                                                 selected: form.item_index,
                                                 query: String::new(),
+                                                fixed_path: form.fixed_path.clone(),
                                             });
                                         } else if key.code == KeyCode::Char('c')
                                             && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -2055,6 +2174,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                             create_modal = Some(CreateModal::Picker(CreatePicker {
                                 selected: 0,
                                 query: String::new(),
+                                fixed_path: None,
                             }));
                         }
                         continue;
@@ -2375,9 +2495,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 insert_paste(input, &value);
                             }
                             form.error = None;
-                            update_dependent_create_defaults(
-                                form,
-                                item,
+                            let selected_path = form.fixed_path.clone().or_else(|| {
                                 selection_path_for_action(
                                     focus,
                                     current.as_deref(),
@@ -2385,8 +2503,8 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                     &preview_cache,
                                     current_selection_entry(&entries, &filtered, selected),
                                 )
-                                .as_deref(),
-                            );
+                            });
+                            update_dependent_create_defaults(form, item, selected_path.as_deref());
                             update_create_path_suggestions(form, item);
                         }
                         continue;
@@ -3735,6 +3853,55 @@ mod tests {
     }
 
     #[test]
+    fn create_cli_launch_defaults_to_current_dir() {
+        let cwd = PathBuf::from("/tmp/navgator-cwd");
+
+        assert_eq!(
+            create_launch_from_args(&[], &cwd),
+            InitialLaunch::CreatePicker { path: cwd.clone() }
+        );
+        assert_eq!(
+            create_launch_from_args(&["new-project".to_string()], &cwd),
+            InitialLaunch::CreateRecipe {
+                selector: "new-project".to_string(),
+                path: cwd,
+            }
+        );
+    }
+
+    #[test]
+    fn create_cli_launch_accepts_recipe_path_argument() {
+        let cwd = PathBuf::from("/tmp/navgator-cwd");
+        let path = PathBuf::from("/tmp/navgator-target");
+
+        assert_eq!(
+            create_launch_from_args(
+                &[
+                    "new-branch-worktree".to_string(),
+                    path.to_string_lossy().to_string(),
+                ],
+                &cwd,
+            ),
+            InitialLaunch::CreateRecipe {
+                selector: "new-branch-worktree".to_string(),
+                path,
+            }
+        );
+    }
+
+    #[test]
+    fn create_recipe_selector_matches_labels() {
+        let items = model::default_create_definitions();
+
+        assert_eq!(create_recipe_selector("New project"), "new-project");
+        assert_eq!(create_recipe_index(&items, "new-project"), Some(0));
+        assert_eq!(
+            create_recipe_index(&items, "New branch + worktree"),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn expands_create_placeholders_and_home_prefix() {
         let old_home = env::var("HOME").ok();
         env::set_var("HOME", "/Users/example");
@@ -3782,7 +3949,7 @@ mod tests {
             current_dir: None,
             success_path: "{target}".to_string(),
         };
-        let mut form = create_form_for_item(0, &item, None);
+        let mut form = create_form_for_item(0, &item, None, None);
 
         assert_eq!(form.inputs[0].value(), "repo");
         assert_eq!(form.inputs[1].value(), "/tmp/repo");
@@ -3814,7 +3981,7 @@ mod tests {
             .into_iter()
             .find(|item| item.label == "New project")
             .expect("new project recipe");
-        let mut form = create_form_for_item(0, &item, None);
+        let mut form = create_form_for_item(0, &item, None, None);
         form.active_prompt = 1;
         update_create_path_suggestions(&mut form, &item);
         form.focus = CreateFormFocus::Completions;
