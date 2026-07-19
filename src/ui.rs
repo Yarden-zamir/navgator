@@ -1,4 +1,5 @@
 use crate::metadata::format_date_display;
+use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, KeyChord, Keymap};
 use crate::model::{
     Focus, HelpColors, HelpContext, PreviewSettings, RemoteToggleState, SidePanelRender, UiLayout,
     VisibleListArgs, DATE_PLACEHOLDER, MIN_PARTIAL_TAB_WIDTH, TAB_DIVIDER_WIDTH,
@@ -13,7 +14,72 @@ use ratatui::{
 };
 use tui_input::Input;
 
-pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<'static> {
+pub(crate) fn keymap_binding_label(
+    keymap: &Keymap,
+    context: BindingContext,
+    action: CoreAction,
+) -> Option<String> {
+    keymap
+        .first_chord_for_target(context, &BindingTarget::Core(action))
+        .map(format_chord_label)
+}
+
+fn format_chord_label(chord: KeyChord) -> String {
+    let canonical = chord.as_str();
+    let has_modifiers = canonical.contains('+');
+    canonical
+        .split('+')
+        .map(|part| match part {
+            "ctrl" => "Ctrl".to_string(),
+            "alt" => "Alt".to_string(),
+            "shift" => "Shift".to_string(),
+            "super" => "Super".to_string(),
+            "enter" => "Enter".to_string(),
+            "space" => "Space".to_string(),
+            "tab" => "Tab".to_string(),
+            "backtab" => "BackTab".to_string(),
+            "esc" => "Esc".to_string(),
+            "backspace" => "Backspace".to_string(),
+            "delete" => "Delete".to_string(),
+            "insert" => "Insert".to_string(),
+            "left" => "Left".to_string(),
+            "right" => "Right".to_string(),
+            "up" => "Up".to_string(),
+            "down" => "Down".to_string(),
+            "home" => "Home".to_string(),
+            "end" => "End".to_string(),
+            "pageup" => "PageUp".to_string(),
+            "pagedown" => "PageDown".to_string(),
+            _ if part
+                .strip_prefix('f')
+                .is_some_and(|number| number.bytes().all(|byte| byte.is_ascii_digit())) =>
+            {
+                part.to_ascii_uppercase()
+            }
+            _ if has_modifiers && part.chars().count() == 1 => part.to_ascii_uppercase(),
+            _ => part.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn push_help_hint(
+    spans: &mut Vec<Span<'static>>,
+    keymap: &Keymap,
+    context: BindingContext,
+    action: CoreAction,
+    description: impl Into<String>,
+    key_style: Style,
+    description_style: Style,
+) {
+    let Some(label) = keymap_binding_label(keymap, context, action) else {
+        return;
+    };
+    spans.push(Span::styled(label, key_style));
+    spans.push(Span::styled(description.into(), description_style));
+}
+
+pub(crate) fn build_help_line(context: HelpContext<'_>, colors: HelpColors) -> Line<'static> {
     let key_style = Style::default()
         .fg(colors.key_color)
         .add_modifier(Modifier::BOLD);
@@ -27,42 +93,102 @@ pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<
     let has_next_preview = context.preview_tab_index + 1 < context.preview_tab_count;
     let has_prev_detail = context.detail_tab_index > 0;
     let has_next_detail = context.detail_tab_index + 1 < context.detail_tab_count;
+    let binding_context = match context.focus {
+        Focus::Search => BindingContext::Navigator,
+        Focus::Preview => BindingContext::Preview,
+        Focus::Detail => BindingContext::Detail,
+        Focus::TagEdit => BindingContext::TagEditor,
+    };
 
     match context.focus {
         Focus::Search => {
             spans.push(Span::styled("Search", label_style));
             spans.push(Span::styled("  ", regular_style));
             if context.cursor_at_end {
-                spans.push(Span::styled("Right", key_style));
-                spans.push(Span::styled(" preview  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveRight,
+                    " preview  ",
+                    key_style,
+                    regular_style,
+                );
             }
-            spans.push(Span::styled("Ctrl+T", key_style));
-            spans.push(Span::styled(" tag  ", regular_style));
-            spans.push(Span::styled("Ctrl+S", key_style));
-            spans.push(Span::styled(
-                format!(" {}  ", context.sort_mode.label()),
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::EditTags,
+                " tag  ",
+                key_style,
                 regular_style,
-            ));
-            spans.push(Span::styled("Ctrl+U", key_style));
-            spans.push(Span::styled(" clear  ", regular_style));
-            spans.push(Span::styled("Ctrl+Y", key_style));
-            spans.push(Span::styled(" copy  ", regular_style));
-            spans.push(Span::styled(
-                context.action_binding_label.clone(),
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::CycleSort,
+                format!(" {}  ", context.sort_mode.label()),
                 key_style,
-            ));
-            spans.push(Span::styled(" actions  ", regular_style));
-            spans.push(Span::styled(
-                context.create_binding_label.clone(),
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::ClearInput,
+                " clear  ",
                 key_style,
-            ));
-            spans.push(Span::styled(" create  ", regular_style));
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::CopyPath,
+                " copy  ",
+                key_style,
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Actions,
+                " actions  ",
+                key_style,
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Create,
+                " create  ",
+                key_style,
+                regular_style,
+            );
             if context.can_delete_worktree {
-                spans.push(Span::styled("Ctrl+D", key_style));
-                spans.push(Span::styled(" delete  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::DeleteWorktree,
+                    " delete  ",
+                    key_style,
+                    regular_style,
+                );
             }
-            spans.push(Span::styled("Ctrl+O", remote_style));
-            spans.push(Span::styled(format!(" {remote_label}"), remote_style));
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::ToggleRemotes,
+                format!(" {remote_label}"),
+                remote_style,
+                remote_style,
+            );
         }
         Focus::Preview => {
             let label = if context.preview_tab_count > 1 {
@@ -76,49 +202,127 @@ pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<
             };
             spans.push(Span::styled(label, label_style));
             spans.push(Span::styled("  ", regular_style));
-            spans.push(Span::styled("Left", key_style));
-            if has_prev_preview {
-                spans.push(Span::styled(" prev  ", regular_style));
-            } else {
-                spans.push(Span::styled(" search  ", regular_style));
-            }
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::MoveLeft,
+                if has_prev_preview {
+                    " prev  "
+                } else {
+                    " search  "
+                },
+                key_style,
+                regular_style,
+            );
             if has_next_preview {
-                spans.push(Span::styled("Right", key_style));
-                spans.push(Span::styled(" next  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveRight,
+                    " next  ",
+                    key_style,
+                    regular_style,
+                );
             } else if context.show_detail {
-                spans.push(Span::styled("Right", key_style));
-                spans.push(Span::styled(" detail  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveRight,
+                    " detail  ",
+                    key_style,
+                    regular_style,
+                );
             }
-            spans.push(Span::styled("Ctrl+T", key_style));
-            spans.push(Span::styled(" tag  ", regular_style));
-            spans.push(Span::styled("Ctrl+Y", key_style));
-            spans.push(Span::styled(" copy  ", regular_style));
-            spans.push(Span::styled(
-                context.action_binding_label.clone(),
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::EditTags,
+                " tag  ",
                 key_style,
-            ));
-            spans.push(Span::styled(" actions  ", regular_style));
-            spans.push(Span::styled(
-                context.create_binding_label.clone(),
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::CopyPath,
+                " copy  ",
                 key_style,
-            ));
-            spans.push(Span::styled(" create  ", regular_style));
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Actions,
+                " actions  ",
+                key_style,
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Create,
+                " create  ",
+                key_style,
+                regular_style,
+            );
             if context.can_delete_worktree {
-                spans.push(Span::styled("Ctrl+D", key_style));
-                spans.push(Span::styled(" delete  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::DeleteWorktree,
+                    " delete  ",
+                    key_style,
+                    regular_style,
+                );
             }
-            spans.push(Span::styled("Ctrl+O", remote_style));
-            spans.push(Span::styled(format!(" {remote_label}  "), remote_style));
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::ToggleRemotes,
+                format!(" {remote_label}  "),
+                remote_style,
+                remote_style,
+            );
             if context.preview_scroll == 0 && !has_prev_preview {
-                spans.push(Span::styled("Up", key_style));
-                spans.push(Span::styled(" search  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveUp,
+                    " search  ",
+                    key_style,
+                    regular_style,
+                );
             }
             if has_next_preview && context.preview_scroll >= context.preview_max_scroll {
-                spans.push(Span::styled("Down", key_style));
-                spans.push(Span::styled(" next", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveDown,
+                    " next",
+                    key_style,
+                    regular_style,
+                );
             } else if context.show_detail && context.preview_scroll >= context.preview_max_scroll {
-                spans.push(Span::styled("Down", key_style));
-                spans.push(Span::styled(" detail", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveDown,
+                    " detail",
+                    key_style,
+                    regular_style,
+                );
             }
         }
         Focus::Detail => {
@@ -133,54 +337,126 @@ pub(crate) fn build_help_line(context: HelpContext, colors: HelpColors) -> Line<
             };
             spans.push(Span::styled(label, label_style));
             spans.push(Span::styled("  ", regular_style));
-            spans.push(Span::styled("Left", key_style));
-            if has_prev_detail {
-                spans.push(Span::styled(" prev  ", regular_style));
-            } else {
-                spans.push(Span::styled(" preview  ", regular_style));
-            }
-            spans.push(Span::styled("Right", key_style));
-            if has_next_detail {
-                spans.push(Span::styled(" next  ", regular_style));
-            } else {
-                spans.push(Span::styled(" preview  ", regular_style));
-            }
-            spans.push(Span::styled("Ctrl+T", key_style));
-            spans.push(Span::styled(" tag  ", regular_style));
-            spans.push(Span::styled("Ctrl+Y", key_style));
-            spans.push(Span::styled(" copy  ", regular_style));
-            spans.push(Span::styled(
-                context.action_binding_label.clone(),
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::MoveLeft,
+                if has_prev_detail {
+                    " prev  "
+                } else {
+                    " preview  "
+                },
                 key_style,
-            ));
-            spans.push(Span::styled(" actions  ", regular_style));
-            spans.push(Span::styled(
-                context.create_binding_label.clone(),
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::MoveRight,
+                if has_next_detail {
+                    " next  "
+                } else {
+                    " preview  "
+                },
                 key_style,
-            ));
-            spans.push(Span::styled(" create  ", regular_style));
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::EditTags,
+                " tag  ",
+                key_style,
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::CopyPath,
+                " copy  ",
+                key_style,
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Actions,
+                " actions  ",
+                key_style,
+                regular_style,
+            );
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Create,
+                " create  ",
+                key_style,
+                regular_style,
+            );
             if context.can_delete_worktree {
-                spans.push(Span::styled("Ctrl+D", key_style));
-                spans.push(Span::styled(" delete  ", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::DeleteWorktree,
+                    " delete  ",
+                    key_style,
+                    regular_style,
+                );
             }
-            spans.push(Span::styled("Ctrl+O", remote_style));
-            spans.push(Span::styled(format!(" {remote_label}  "), remote_style));
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::ToggleRemotes,
+                format!(" {remote_label}  "),
+                remote_style,
+                remote_style,
+            );
             if context.detail_scroll == 0 {
-                spans.push(Span::styled("Up", key_style));
-                spans.push(Span::styled(" preview", regular_style));
+                push_help_hint(
+                    &mut spans,
+                    context.keymap,
+                    binding_context,
+                    CoreAction::MoveUp,
+                    " preview",
+                    key_style,
+                    regular_style,
+                );
             }
         }
         Focus::TagEdit => {
             spans.push(Span::styled("Tag", label_style));
             spans.push(Span::styled("  ", regular_style));
-            spans.push(Span::styled("Tab", key_style));
-            spans.push(Span::styled(" add  ", regular_style));
-            spans.push(Span::styled("Enter", key_style));
-            if context.has_tag_input {
-                spans.push(Span::styled(" add+done", regular_style));
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Accept,
+                " add  ",
+                key_style,
+                regular_style,
+            );
+            let confirm_description = if context.has_tag_input {
+                " add+done"
             } else {
-                spans.push(Span::styled(" done", regular_style));
-            }
+                " done"
+            };
+            push_help_hint(
+                &mut spans,
+                context.keymap,
+                binding_context,
+                CoreAction::Confirm,
+                confirm_description,
+                key_style,
+                regular_style,
+            );
         }
     }
 
@@ -1137,4 +1413,85 @@ fn render_preview_panel(
         .scroll((render.preview_scroll, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(preview_paragraph, content_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::keybindings::{default_keymap, Binding};
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    fn help_context(keymap: &Keymap, focus: Focus) -> HelpContext<'_> {
+        HelpContext {
+            keymap,
+            focus,
+            sort_mode: crate::model::SortMode::Match,
+            remote_state: RemoteToggleState::Off,
+            can_delete_worktree: false,
+            show_detail: false,
+            cursor_at_end: false,
+            has_tag_input: false,
+            preview_tab_index: 0,
+            preview_tab_count: 1,
+            preview_scroll: 0,
+            preview_max_scroll: 0,
+            detail_tab_index: 0,
+            detail_tab_count: 0,
+            detail_scroll: 0,
+        }
+    }
+
+    fn help_text(keymap: &Keymap, focus: Focus) -> String {
+        build_help_line(
+            help_context(keymap, focus),
+            HelpColors {
+                text: Color::White,
+                accent: Color::Blue,
+                key_color: Color::Gray,
+                remote_color: Color::Yellow,
+            },
+        )
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+    }
+
+    #[test]
+    fn binding_labels_are_readable_and_use_the_active_context() {
+        let mut keymap = default_keymap();
+        keymap.set(
+            BindingContext::Preview,
+            Binding::new(
+                KeyChord::new(KeyCode::F(2), KeyModifiers::NONE),
+                BindingTarget::Core(CoreAction::EditTags),
+            ),
+        );
+
+        assert_eq!(
+            keymap_binding_label(
+                &keymap,
+                BindingContext::ActionPicker,
+                CoreAction::RunAndClose,
+            )
+            .as_deref(),
+            Some("Ctrl+Enter")
+        );
+        let help = help_text(&keymap, Focus::Preview);
+        assert!(help.contains("F2 tag"));
+        assert!(!help.contains("Ctrl+T tag"));
+    }
+
+    #[test]
+    fn unbound_actions_are_omitted_from_help() {
+        let mut keymap = default_keymap();
+        keymap.remove_target(
+            BindingContext::Navigator,
+            &BindingTarget::Core(CoreAction::Actions),
+        );
+
+        let help = help_text(&keymap, Focus::Search);
+        assert!(!help.contains("actions"));
+        assert!(help.contains("Ctrl+N create"));
+    }
 }

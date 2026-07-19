@@ -19,6 +19,10 @@
 - `navgator` without arguments behaves like `navgator navigate`.
 - `navgator actions` loads config and opens directly to the action picker for the first result.
 - `navgator actions <path>` loads config and opens directly to the action picker for the provided path.
+- Interactive commands accept repeatable `--config-entry <toml>` and `--config-entry=<toml>` options.
+- Config entries are parsed as TOML fragments and applied in argument order after discovered config files.
+- A CLI config entry containing only `actions.picker` preserves effective action definitions and overrides picker visibility for that invocation.
+- Schema and help commands reject `--config-entry`.
 
 ## Discovery
 
@@ -48,12 +52,15 @@
 - Duplicate normalized paths are ignored after their first occurrence.
 - `index_folders` and `static_items` are merged independently.
 - Actions are replaced by the latest config file that contains an `[actions]` table.
+- Keybindings merge by canonical context and chord across config files.
+- Later keybinding entries replace earlier entries for the same canonical context and chord.
+- CLI config-entry keybindings have the highest precedence.
 - Theme settings are replaced by the latest config file that contains `[ui].theme`.
 - Sort settings are replaced field by field by later config files.
 - Remote settings are replaced field by field by later config files.
 - Preview settings are replaced field by field by later config files.
 - Invalid TOML or invalid typed values fail config loading with a user-visible error.
-- Unknown config keys are ignored by deserialization unless the schema validator is used externally.
+- Unknown config keys are ignored by deserialization unless the schema validator is used externally, except unknown contexts inside `[keybindings]`, which fail loading.
 
 ## Runtime Defaults
 
@@ -72,6 +79,8 @@
 - Runtime action defaults are the built-in action list.
 - Runtime action defaults are used when no `[actions]` table is configured.
 - Runtime action defaults are used when action configuration produces no valid action items.
+- Runtime keybinding defaults preserve the documented navigator, picker, form, editor, and overlay commands.
+- Missing or partial `[keybindings]` configuration keeps unrelated runtime keybinding defaults.
 - Runtime create defaults are the built-in create recipe list.
 - Runtime create defaults are used when no `[create]` table is configured.
 - Runtime create defaults are used when create configuration produces no valid create items.
@@ -89,11 +98,13 @@
 - Written defaults must include `[actions]`.
 - Written defaults must omit action default toggles because listed actions replace built-ins by default.
 - Written defaults must write every built-in action as an explicit `[[actions.items]]` entry.
+- Written default actions include stable `id` values.
 - Written default actions must be behaviorally equivalent to runtime action defaults.
 - Written defaults must include `[create]`.
 - Written defaults must write every built-in create recipe as an explicit `[[create.items]]` entry.
 - Written default create recipes must be behaviorally equivalent to runtime create defaults.
 - Written default actions are intended to be edited in place by users.
+- Written defaults include every context in `[keybindings]` with the runtime default command bindings.
 - Runtime defaults and written defaults may share source data, but they are different concepts.
 
 ## Paths
@@ -112,9 +123,17 @@
 - Listed `actions.items` replace built-in actions by default.
 - `[actions].include_defaults = true` prepends the built-in action list before listed actions.
 - When `[actions]` has no valid listed action items, navgator falls back to built-in actions.
-- `[actions].bindings` controls the key bindings that open the action picker and run+close inside it.
-- `[actions].bindings` defaults to `ctrl-enter` and `ctrl-space` when omitted or invalid.
-- The UI shows only the first configured action picker binding.
+- `[actions].bindings` is deprecated compatibility configuration for opening the action picker and running with parent-session closure.
+- Legacy `[actions].bindings` defaults to `ctrl-enter` and `ctrl-space` when omitted or invalid.
+- Legacy bindings are translated before `[keybindings]` and CLI config-entry overrides are applied.
+- Action `id` is optional for picker-only actions and required when an action is a keybinding target.
+- Action IDs must be unique lowercase ASCII words separated by single dashes and cannot use reserved core action IDs.
+- Optional `[actions].picker` is an ordered allowlist of action IDs shown in the action picker.
+- Omitting `[actions].picker` shows every effective action.
+- An empty `[actions].picker` shows the picker empty state.
+- Unknown or duplicate picker IDs fail config loading.
+- Actions omitted from `[actions].picker` remain available as direct keybinding targets.
+- Picker allowlist order takes precedence over action item order.
 - Empty action labels are ignored.
 - Action icons are optional.
 - Action icons may use Nerd Font glyphs or emoji.
@@ -125,7 +144,7 @@
 - Command actions require a non-empty `command`.
 - Open URL actions require a non-empty `url`.
 - Navigate actions do not require additional fields.
-- Action item order is preserved.
+- Action item order is preserved when no picker allowlist is configured.
 - Built-in actions must remain available through runtime defaults.
 - Built-in action commands must remain available through starter config generation.
 - `{path}` expands to the resolved selected path when an action runs.
@@ -136,8 +155,8 @@
 
 - `[branches].on_select` controls what happens when a remote branch result is selected.
 - `[branches].on_select` defaults to `worktree`.
-- `worktree` creates or reuses a worktree for the selected remote branch and navigates to it.
-- `checkout` fetches/prepares the selected remote branch, checks it out in an existing worktree for the selected bare repo, and navigates to that worktree.
+- `worktree` creates or reuses a worktree for the selected remote branch, then continues the bound target action with that path.
+- `checkout` fetches/prepares the selected remote branch, checks it out in an existing worktree for the selected bare repo, then continues the bound target action with that path.
 - `checkout` does not create a new working tree.
 - `checkout` fails with a clear error when no existing worktree is available.
 - Both branch selection modes share the same remote ref preparation behavior.
@@ -147,9 +166,8 @@
 - Listed `create.items` replace built-in create recipes by default.
 - `[create].include_defaults = true` prepends the built-in create recipe list before listed recipes.
 - When `[create]` has no valid listed recipes, navgator falls back to built-in create recipes.
-- `[create].bindings` controls the key bindings that open the create picker.
-- `[create].bindings` defaults to `ctrl-n` when omitted or invalid.
-- The UI shows only the first configured create picker binding.
+- `[create].bindings` is deprecated compatibility configuration for opening the create picker.
+- Legacy `[create].bindings` defaults to `ctrl-n` when omitted or invalid.
 - Create recipe labels must be non-empty.
 - Create recipe shell values must be non-empty.
 - Create recipe `success_path` values must be non-empty.
@@ -187,6 +205,7 @@
 - Schema generation must be regenerated after config structs change.
 - The generated schema must include all public config sections.
 - The generated schema must include all action item variants.
+- The generated schema must include action IDs and every keybinding context.
 - The generated schema must include branch selection behavior.
 - The generated schema must include create settings and prompt types.
 
@@ -195,6 +214,7 @@
 - README must mention `navgator config-schema`.
 - README must document the zsh wrapper relationship with `GATOR_OUTPUT`.
 - README must document action picker bindings.
+- README must document keybinding contexts, action IDs, key chord syntax, `none`, and `--config-entry`.
 - README must document the difference between runtime defaults and written defaults.
 - README must document `actions.include_defaults`.
 - README must document `{path}` and `{github_url}` placeholders.

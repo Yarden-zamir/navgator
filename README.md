@@ -39,41 +39,108 @@ Print the JSON config schema:
 navgator config-schema
 ```
 
+Override one or more config entries for a single invocation with valid TOML dotted assignments:
+
+```sh
+navgator --config-entry 'keybindings.navigator.enter="actions"'
+navgator --config-entry 'sort.default="alpha-asc"' \
+  --config-entry 'remote.enabled_by_default=true'
+```
+
 Config behavior, discovery order, runtime defaults, written defaults, and schema rules are specified in `docs/config-behavior-spec.md`.
 
 ## Zsh Widget
 
-```sh
-source "$(brew --prefix)/share/navgator/navgator.zsh"
+Choose one setup path.
+
+Homebrew manages both the binary and wrapper:
+
+```zsh
+brew install yarden-zamir/tap/navgator
+source "$(brew --prefix navgator)/share/navgator/navgator.zsh"
 bindkey '^T' navigate
 bindkey '^N' navgator-create-new-project
 ```
 
+Alternatively, [gh-source](https://github.com/Yarden-zamir/gh-source) clones the repository, builds a missing local release binary, and sources the local wrapper:
+
+```zsh
+gh_source Yarden-zamir/navgator/scripts/navgator.zsh \
+  --skip-build-if-present target/release/navgator \
+  --build cargo build --release
+bindkey '^T' navigate
+bindkey '^N' navgator-create-new-project
+```
+
+The wrapper prefers `$NAVGATOR_BIN`, then adjacent local release and debug builds, then `navgator` on `PATH`.
 The wrapper writes selections through `GATOR_OUTPUT`; otherwise `navgator` prints the selected path to stdout.
 
 ## Actions
 
-Press `Ctrl+Enter` or `Ctrl+Space` to open the action picker. A newly generated config writes the built-in actions explicitly so they can be edited in place:
+Press `Ctrl+Enter` or `Ctrl+Space` to open the action picker. A newly generated config writes stable action IDs and the built-in actions explicitly so they can be edited or bound directly:
 
 ```toml
 [actions]
-bindings = ["ctrl-enter", "ctrl-space"]
+picker = ["open-vs-code", "navigate-to"]
 
 [[actions.items]]
+id = "navigate-to"
 label = "Navigate to"
 icon = "󰁔"
 type = "navigate"
 
 [[actions.items]]
-label = "Open terminal here"
-icon = ""
-file_condition = ".git"
+id = "open-vs-code"
+label = "Open VS Code"
 type = "command"
-command = "zsh"
-current_dir = "{path}"
+command = "open"
+args = ["-a", "Visual Studio Code", "{path}"]
 ```
 
-Runtime defaults still exist when no actions are configured. Listing `actions.items` replaces the built-ins; set `include_defaults = true` only when you want built-ins prepended before listed actions. Built-in actions navigate to the target, open GitHub Desktop, open VS Code, run `idea .`, open the repo online, start `claude`, and start `opencode`. Custom command and URL actions can use `{path}` and `{github_url}` placeholders. Optional `icon` text supports Nerd Font glyphs or emoji. Optional `file_condition` hides an action unless the given file or directory exists under the selected target. In the action picker, type to filter actions, `Enter` runs the action and keeps the shell session open, and any configured picker binding runs it and asks the zsh wrapper to close the shell session afterward. Only the first configured binding is shown in the UI hints.
+Runtime defaults still exist when no actions are configured. Listing `actions.items` replaces the built-ins; set `include_defaults = true` only when you want built-ins prepended before listed actions. Optional `picker` lists the action IDs shown in the picker and controls their display order; omit it to show every effective action. Hidden actions remain available as direct keybinding targets. Built-in actions navigate to the target, open GitHub Desktop, open VS Code, run `idea .`, open the repo online, start `claude`, and start `opencode`. Custom command and URL actions can use `{path}` and `{github_url}` placeholders. Optional `icon` text supports Nerd Font glyphs or emoji. Optional `file_condition` hides an action unless the given file or directory exists under the selected target. In the action picker, type to filter actions, `Enter` runs the action and keeps the shell session open, and `run-and-close` asks the zsh wrapper to close the shell session after success.
+
+## Key Bindings
+
+Bindings map a single key chord to a core action or configured action ID within one UI context:
+
+```toml
+[keybindings.navigator]
+enter = "navigate"
+"ctrl+enter" = "actions"
+"ctrl+space" = "actions"
+"ctrl+n" = "create"
+"ctrl+v" = "open-vs-code"
+
+[keybindings.action-picker]
+enter = "run"
+"ctrl+enter" = "run-and-close"
+esc = "cancel"
+```
+
+Available contexts are `global`, `navigator`, `preview`, `detail`, `tag-editor`, `action-picker`, `create-picker`, `create-form`, `create-completions`, `progress-overlay`, and `error-overlay`. Use `none` to disable a default chord. Modifiers use `ctrl`, `alt`, `shift`, and `super`; named keys include arrows, `enter`, `space`, `tab`, `esc`, paging keys, and function keys. Existing `[actions].bindings` and `[create].bindings` remain supported but are deprecated.
+
+Custom action IDs are optional unless the action is a binding target. IDs must be unique lowercase ASCII words separated by single dashes and cannot reuse core action names such as `navigate`, `actions`, or `create`.
+
+For an ephemeral Ghostty project launcher, bind Enter to the action picker only for that process:
+
+```sh
+open -na Ghostty.app --args \
+  --config-default-files=false \
+  --font-size=25 \
+  --maximize=true \
+  --background-opacity=0.9 \
+  --background-blur=true \
+  --window-save-state=never \
+  --macos-titlebar-style=hidden \
+  --confirm-close-surface=false \
+  -e /opt/homebrew/bin/navgator \
+  --config-entry 'ui.theme="dark"' \
+  --config-entry 'actions.picker=["open-vs-code","open-github-desktop","open-repo-online","open-intellij"]' \
+  --config-entry 'keybindings.navigator.enter="actions"'
+```
+
+Navgator's `ui.theme = "auto"` follows the operating-system appearance, not the terminal background. Set `ui.theme` to `dark` or `light` for isolated terminal launchers whose colors may differ from the operating system.
+An `actions.picker` config entry changes only picker visibility for that invocation and preserves action definitions loaded from config files.
 
 ## Branches
 
@@ -92,7 +159,6 @@ Press `Ctrl+N` to open the create picker. Create recipes collect typed prompts, 
 
 ```toml
 [create]
-bindings = ["ctrl-n"]
 
 [[create.items]]
 label = "New project"

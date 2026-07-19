@@ -49,6 +49,18 @@
         }
       ]
     },
+    "keybindings": {
+      "title": "Keybindings",
+      "description": "Context-specific mappings from key chords to core or configured action identifiers.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConfigKeybindings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "paths": {
       "title": "Paths",
       "description": "Path collection settings used to build the navigation list.",
@@ -214,6 +226,16 @@
             "null"
           ]
         },
+        "id": {
+          "title": "Action ID",
+          "description": "Optional stable identifier used as a keybinding target.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
         "label": {
           "title": "Label",
           "description": "Text shown in the action picker.",
@@ -227,8 +249,8 @@
       "type": "object",
       "properties": {
         "bindings": {
-          "title": "Picker Bindings",
-          "description": "Key bindings that open the action picker and run+close inside it. Supported values: ctrl-enter, ctrl-space. The UI shows only the first valid binding.",
+          "title": "Legacy Picker Bindings",
+          "description": "Deprecated compatibility bindings that open the action picker and run+close inside it. Supported values: ctrl-enter, ctrl-space. Use keybindings instead.",
           "default": [],
           "type": "array",
           "items": {
@@ -250,6 +272,18 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/ConfigAction"
+          }
+        },
+        "picker": {
+          "title": "Picker Actions",
+          "description": "Optional ordered allowlist of action IDs shown in the action picker. Omit to show every effective action. Hidden actions remain available as direct keybinding targets.",
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
           }
         }
       }
@@ -286,8 +320,8 @@
       "type": "object",
       "properties": {
         "bindings": {
-          "title": "Create Picker Bindings",
-          "description": "Key bindings that open the create picker. Supported values: ctrl-n. The UI shows only the first valid binding.",
+          "title": "Legacy Create Picker Bindings",
+          "description": "Deprecated compatibility bindings that open the create picker. Supported value: ctrl-n. Use keybindings instead.",
           "default": [],
           "type": "array",
           "items": {
@@ -423,6 +457,122 @@
         "text",
         "path"
       ]
+    },
+    "ConfigKeybindings": {
+      "type": "object",
+      "properties": {
+        "action-picker": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "create-completions": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "create-form": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "create-picker": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "detail": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "error-overlay": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "global": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "navigator": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "preview": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "progress-overlay": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tag-editor": {
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "ConfigPaths": {
       "title": "Path Settings",

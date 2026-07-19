@@ -1,4 +1,6 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
@@ -39,17 +41,18 @@ use content::{
 use gator::{copy_to_clipboard, ensure_tty_stdin, input_at_end, setup_terminal, write_selection};
 use github::ensure_github_readme_for_preview;
 use metadata::{ensure_dates_for_paths, spawn_bulk_metadata_fetch};
+use model::keybindings::{BindingContext, BindingTarget, CoreAction, Keymap};
 use model::{
-    ActionBinding, ActionBindingKey, ActionDefinition, ActionKind, ActionSettings, AppResult,
-    BranchSelectBehavior, BranchSettings, CreateDefinition, CreatePromptKind, CreateSettings,
-    Focus, GitResult, GithubReadmeResult, HelpColors, HelpContext, MetaResult, NavigateEntry,
-    NavigateEntryKind, PreviewColors, PreviewData, PreviewResult, PreviewSettings, RemoteSettings,
-    RemoteToggleState, ResultUpdate, SidePanelRender, SortMeta, SortMode, SortSettings, TagResult,
-    ThemeColors, VisibleListArgs, DATE_PLACEHOLDER,
+    ActionDefinition, ActionKind, ActionSettings, AppResult, BranchSelectBehavior, BranchSettings,
+    CreateDefinition, CreatePromptKind, CreateSettings, Focus, GitResult, GithubReadmeResult,
+    HelpColors, HelpContext, MetaResult, NavigateEntry, NavigateEntryKind, PreviewColors,
+    PreviewData, PreviewResult, PreviewSettings, RemoteSettings, RemoteToggleState, ResultUpdate,
+    SidePanelRender, SortMeta, SortMode, SortSettings, TagResult, ThemeColors, VisibleListArgs,
+    DATE_PLACEHOLDER,
 };
 use results::{
-    build_items, spawn_remote_branch_result_provider, spawn_worktree_result_provider,
-    REMOTE_BRANCH_PROVIDER_PREFIX,
+    build_items_with_config_entries, spawn_remote_branch_result_provider,
+    spawn_worktree_result_provider, REMOTE_BRANCH_PROVIDER_PREFIX,
 };
 use search::{filter_and_sort, index_for_entry_id, parse_query_tokens};
 use tags::{
@@ -58,15 +61,23 @@ use tags::{
 };
 use ui::{
     build_help_line, build_visible_list_items, compose_preview_text,
-    compose_preview_text_with_input, compute_ui_layout, preview_content_area, rect_contains,
-    render_side_panels, text_line_count,
+    compose_preview_text_with_input, compute_ui_layout, keymap_binding_label, preview_content_area,
+    rect_contains, render_side_panels, text_line_count,
 };
 
 fn main() -> AppResult<()> {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    let (args, config_entries) = match split_config_entries(&raw_args) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{error}");
+            print_usage();
+            std::process::exit(2);
+        }
+    };
     if args.is_empty() || args[0] == "navigate" {
         ensure_tty_stdin()?;
-        return run_navigate(InitialLaunch::Navigate);
+        return run_navigate(InitialLaunch::Navigate, &config_entries);
     }
     if args[0] == "actions" || args[0] == "action-picker" {
         ensure_tty_stdin()?;
@@ -75,16 +86,21 @@ fn main() -> AppResult<()> {
         } else {
             InitialLaunch::ActionsFirstResult
         };
-        return run_navigate(launch);
+        return run_navigate(launch, &config_entries);
     }
     if args[0] == "create" || args[0] == "new" {
         ensure_tty_stdin()?;
-        return run_navigate(create_launch_from_args(&args[1..], &env::current_dir()?));
+        return run_navigate(
+            create_launch_from_args(&args[1..], &env::current_dir()?),
+            &config_entries,
+        );
     }
     if args[0] == "config-schema" || args[0] == "schema" {
+        reject_config_entries(&config_entries);
         return print_config_schema();
     }
     if args[0] == "--help" || args[0] == "-h" {
+        reject_config_entries(&config_entries);
         print_usage();
         return Ok(());
     }
@@ -95,7 +111,43 @@ fn main() -> AppResult<()> {
 }
 
 fn print_usage() {
-    eprintln!("Usage:\n  navgator [navigate|actions [path]|create [recipe] [path]|config-schema]");
+    eprintln!(
+        "Usage:\n  navgator [--config-entry TOML]... [navigate|actions [path]|create [recipe] [path]|config-schema]"
+    );
+}
+
+fn split_config_entries(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
+    let mut positional = Vec::new();
+    let mut entries = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--config-entry" {
+            index += 1;
+            let Some(value) = args.get(index).filter(|value| !value.trim().is_empty()) else {
+                return Err("--config-entry requires a non-empty TOML assignment".to_string());
+            };
+            entries.push(value.clone());
+        } else if let Some(value) = arg.strip_prefix("--config-entry=") {
+            if value.trim().is_empty() {
+                return Err("--config-entry requires a non-empty TOML assignment".to_string());
+            }
+            entries.push(value.to_string());
+        } else {
+            positional.push(arg.clone());
+        }
+        index += 1;
+    }
+    Ok((positional, entries))
+}
+
+fn reject_config_entries(entries: &[String]) {
+    if entries.is_empty() {
+        return;
+    }
+    eprintln!("--config-entry is only valid for interactive commands");
+    print_usage();
+    std::process::exit(2);
 }
 
 fn print_config_schema() -> AppResult<()> {
@@ -143,6 +195,14 @@ impl WorktreeOverlay {
     fn fail(&mut self, message: String) {
         self.error = Some(message);
     }
+
+    fn failed(title: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            messages: Vec::new(),
+            error: Some(message.into()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,8 +233,8 @@ fn create_launch_from_args(args: &[String], cwd: &Path) -> InitialLaunch {
     }
 }
 
-fn run_navigate(initial_launch: InitialLaunch) -> AppResult<()> {
-    let result = build_items()?;
+fn run_navigate(initial_launch: InitialLaunch, config_entries: &[String]) -> AppResult<()> {
+    let result = build_items_with_config_entries(config_entries)?;
     match select_from_list(SelectListArgs {
         entries: result.entries,
         preview_settings: result.preview_settings,
@@ -184,6 +244,7 @@ fn run_navigate(initial_launch: InitialLaunch) -> AppResult<()> {
         action_settings: result.action_settings,
         create_settings: result.create_settings,
         theme_colors: result.theme_colors,
+        keymap: result.keymap,
         initial_launch,
     })? {
         Some(NavigateOutcome::Navigate {
@@ -217,6 +278,18 @@ enum NavigateOutcome {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TargetAction {
+    Navigate,
+    Actions,
+    Configured(String),
+}
+
+enum TargetActionDispatch {
+    OpenActions,
+    Exit(NavigateOutcome),
+}
+
 struct SelectListArgs {
     entries: Vec<NavigateEntry>,
     preview_settings: PreviewSettings,
@@ -226,6 +299,7 @@ struct SelectListArgs {
     action_settings: ActionSettings,
     create_settings: CreateSettings,
     theme_colors: ThemeColors,
+    keymap: Keymap,
     initial_launch: InitialLaunch,
 }
 
@@ -257,7 +331,7 @@ struct ActionPickerRender<'a> {
     visible_actions: &'a [usize],
     selected: usize,
     query: &'a str,
-    action_binding_label: &'a str,
+    keymap: &'a Keymap,
     colors: ActionPickerColors,
 }
 
@@ -301,13 +375,14 @@ struct CreatePickerRender<'a> {
     visible_items: &'a [usize],
     selected: usize,
     query: &'a str,
-    create_binding_label: &'a str,
+    keymap: &'a Keymap,
     colors: ActionPickerColors,
 }
 
 struct CreateFormRender<'a> {
     item: &'a CreateDefinition,
     form: &'a CreateForm,
+    keymap: &'a Keymap,
     colors: ActionPickerColors,
 }
 
@@ -410,6 +485,55 @@ fn resolve_picker_action(
     }
 }
 
+fn target_action_from_binding(target: &BindingTarget) -> Option<TargetAction> {
+    match target {
+        BindingTarget::Core(CoreAction::Navigate) => Some(TargetAction::Navigate),
+        BindingTarget::Core(CoreAction::Actions) => Some(TargetAction::Actions),
+        BindingTarget::Configured(id) => Some(TargetAction::Configured(id.clone())),
+        BindingTarget::Core(_) | BindingTarget::Disabled => None,
+    }
+}
+
+fn take_pending_target_action(pending: &mut Option<TargetAction>) -> Result<TargetAction, String> {
+    pending
+        .take()
+        .ok_or_else(|| "Remote branch completed without a pending target action".to_string())
+}
+
+fn dispatch_target_action(
+    target: &TargetAction,
+    path: &str,
+    actions: &[ActionDefinition],
+) -> Result<TargetActionDispatch, String> {
+    match target {
+        TargetAction::Navigate => Ok(TargetActionDispatch::Exit(NavigateOutcome::Navigate {
+            path: path.to_string(),
+            close_session: false,
+        })),
+        TargetAction::Actions => Ok(TargetActionDispatch::OpenActions),
+        TargetAction::Configured(id) => {
+            let action = actions
+                .iter()
+                .find(|action| action.id.as_deref() == Some(id.as_str()))
+                .ok_or_else(|| format!("Configured action {id:?} is unavailable"))?;
+            if !action_file_condition_matches(action, Some(path)) {
+                return Err(format!(
+                    "Action {:?} is unavailable because its file condition is not met",
+                    action.label
+                ));
+            }
+            resolve_picker_action(Some(action), Some(path), false)
+                .map(TargetActionDispatch::Exit)
+                .ok_or_else(|| {
+                    format!(
+                        "Action {:?} requires target metadata that is unavailable",
+                        action.label
+                    )
+                })
+        }
+    }
+}
+
 fn github_url_for_action(path: Option<&str>) -> Option<String> {
     github::github_url_for_path(Path::new(path?))
 }
@@ -454,55 +578,30 @@ fn previous_picker_index(selected: usize, len: usize) -> usize {
     }
 }
 
-fn first_action_binding_label(bindings: &[ActionBinding]) -> String {
-    bindings
-        .first()
-        .map(|binding| binding.label.clone())
-        .unwrap_or_else(|| "Ctrl+Enter".to_string())
-}
-
-fn first_create_binding_label(bindings: &[ActionBinding]) -> String {
-    bindings
-        .first()
-        .map(|binding| binding.label.clone())
-        .unwrap_or_else(|| "Ctrl+N".to_string())
-}
-
-fn matches_action_binding(key: &KeyEvent, bindings: &[ActionBinding]) -> bool {
-    bindings
-        .iter()
-        .any(|binding| matches_action_binding_key(key, &binding.key))
-}
-
-fn matches_action_binding_key(key: &KeyEvent, binding: &ActionBindingKey) -> bool {
-    match binding {
-        ActionBindingKey::CtrlEnter => {
-            key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL)
-        }
-        ActionBindingKey::CtrlSpace => {
-            key.code == KeyCode::Char(' ') && key.modifiers.contains(KeyModifiers::CONTROL)
-        }
-        ActionBindingKey::CtrlN => {
-            key.code == KeyCode::Char('n') && key.modifiers.contains(KeyModifiers::CONTROL)
-        }
-    }
-}
-
-fn matches_create_binding(key: &KeyEvent, bindings: &[ActionBinding]) -> bool {
-    matches_action_binding(key, bindings)
-}
-
 fn filtered_action_indexes(
     actions: &[ActionDefinition],
+    picker: Option<&[String]>,
     query: &str,
     path: Option<&str>,
 ) -> Vec<usize> {
     let query = query.trim().to_lowercase();
-    actions
-        .iter()
-        .enumerate()
-        .filter(|(_, action)| action_file_condition_matches(action, path))
-        .filter(|(_, action)| {
+    let indexes = picker.map_or_else(
+        || (0..actions.len()).collect::<Vec<_>>(),
+        |ids| {
+            ids.iter()
+                .filter_map(|id| {
+                    actions
+                        .iter()
+                        .position(|action| action.id.as_deref() == Some(id.as_str()))
+                })
+                .collect()
+        },
+    );
+    indexes
+        .into_iter()
+        .filter(|index| action_file_condition_matches(&actions[*index], path))
+        .filter(|index| {
+            let action = &actions[*index];
             query.is_empty()
                 || action.label.to_lowercase().contains(&query)
                 || action
@@ -510,7 +609,6 @@ fn filtered_action_indexes(
                     .as_deref()
                     .is_some_and(|icon| icon.to_lowercase().contains(&query))
         })
-        .map(|(index, _)| index)
         .collect()
 }
 
@@ -553,6 +651,10 @@ fn clamp_picker_selection(picker: &mut ActionPicker, visible_len: usize) {
     } else if picker.selected >= visible_len {
         picker.selected = visible_len - 1;
     }
+}
+
+fn picker_list_selection(visible_len: usize, selected: usize, offset: usize) -> Option<usize> {
+    (visible_len > 0).then(|| selected.saturating_sub(offset))
 }
 
 fn clamp_create_picker_selection(picker: &mut CreatePicker, visible_len: usize) {
@@ -988,6 +1090,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
         action_settings,
         create_settings,
         theme_colors,
+        keymap,
         initial_launch,
     } = args;
     let initial_launch = match initial_launch {
@@ -1022,8 +1125,6 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
     let key_color = theme_colors.key_color;
     let text = theme_colors.text;
     let muted = theme_colors.muted;
-    let action_binding_label = first_action_binding_label(&action_settings.picker_bindings);
-    let create_binding_label = first_create_binding_label(&create_settings.picker_bindings);
     let (preview_tx, preview_rx) = mpsc::channel::<PreviewResult>();
     let (git_tx, git_rx) = mpsc::channel::<GitResult>();
     let (github_tx, github_rx) = mpsc::channel::<GithubReadmeResult>();
@@ -1077,6 +1178,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
     let mut tag_suggestions: Vec<String> = Vec::new();
     let mut worktree_overlay: Option<WorktreeOverlay> = None;
     let mut create_overlay: Option<WorktreeOverlay> = None;
+    let mut pending_target_action: Option<TargetAction> = None;
     let mut create_modal: Option<CreateModal> = initial_create_modal(
         &initial_launch,
         &create_settings.items,
@@ -1129,11 +1231,32 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                     }
                 }
                 WorktreeProgress::Select(path) => {
-                    terminal.show_cursor()?;
-                    return Ok(Some(NavigateOutcome::Navigate {
-                        path,
-                        close_session: false,
-                    }));
+                    let target = match take_pending_target_action(&mut pending_target_action) {
+                        Ok(target) => target,
+                        Err(message) => {
+                            worktree_overlay =
+                                Some(WorktreeOverlay::failed("Action failed", message));
+                            continue;
+                        }
+                    };
+                    worktree_overlay = None;
+                    match dispatch_target_action(&target, &path, &action_settings.items) {
+                        Ok(TargetActionDispatch::OpenActions) => {
+                            action_picker = Some(ActionPicker {
+                                selected: 0,
+                                query: String::new(),
+                                fixed_path: Some(path),
+                            });
+                        }
+                        Ok(TargetActionDispatch::Exit(outcome)) => {
+                            terminal.show_cursor()?;
+                            return Ok(Some(outcome));
+                        }
+                        Err(message) => {
+                            worktree_overlay =
+                                Some(WorktreeOverlay::failed("Action failed", message));
+                        }
+                    }
                 }
                 WorktreeProgress::Deleted(path) => {
                     entries.retain(|entry| entry.selection_path != path);
@@ -1154,6 +1277,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                     worktree_overlay = None;
                 }
                 WorktreeProgress::Error(message) => {
+                    pending_target_action = None;
                     if let Some(overlay) = worktree_overlay.as_mut() {
                         overlay.fail(message);
                     }
@@ -1678,6 +1802,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
 
             let help_line = build_help_line(
                 HelpContext {
+                    keymap: &keymap,
                     focus,
                     sort_mode,
                     remote_state,
@@ -1692,8 +1817,6 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                     detail_tab_index: compositor.detail_tab_index,
                     detail_tab_count: compositor.detail_tabs.len(),
                     detail_scroll: compositor.detail_scroll,
-                    action_binding_label: action_binding_label.clone(),
-                    create_binding_label: create_binding_label.clone(),
                 },
                 HelpColors {
                     text,
@@ -1715,10 +1838,32 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
             frame.render_widget(help, ui.help_area);
 
             if let Some(overlay) = worktree_overlay.as_ref() {
-                render_worktree_overlay(frame, size.into(), overlay, accent, warm, text, muted);
+                render_worktree_overlay(
+                    frame,
+                    size.into(),
+                    overlay,
+                    &keymap,
+                    ActionPickerColors {
+                        accent,
+                        warm,
+                        text,
+                        muted,
+                    },
+                );
             }
             if let Some(overlay) = create_overlay.as_ref() {
-                render_worktree_overlay(frame, size.into(), overlay, accent, warm, text, muted);
+                render_worktree_overlay(
+                    frame,
+                    size.into(),
+                    overlay,
+                    &keymap,
+                    ActionPickerColors {
+                        accent,
+                        warm,
+                        text,
+                        muted,
+                    },
+                );
             }
             if let Some(picker) = action_picker.as_ref() {
                 let path = picker.fixed_path.clone().or_else(|| {
@@ -1730,8 +1875,12 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         current_selection_entry(&entries, &filtered, selected),
                     )
                 });
-                let visible_actions =
-                    filtered_action_indexes(&action_settings.items, &picker.query, path.as_deref());
+                let visible_actions = filtered_action_indexes(
+                    &action_settings.items,
+                    action_settings.picker.as_deref(),
+                    &picker.query,
+                    path.as_deref(),
+                );
                 render_action_picker(
                     frame,
                     size.into(),
@@ -1740,7 +1889,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         visible_actions: &visible_actions,
                         selected: picker.selected,
                         query: &picker.query,
-                        action_binding_label: &action_binding_label,
+                        keymap: &keymap,
                         colors: ActionPickerColors {
                             accent,
                             warm,
@@ -1763,7 +1912,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 visible_items: &visible_items,
                                 selected: picker.selected,
                                 query: &picker.query,
-                                create_binding_label: &create_binding_label,
+                                keymap: &keymap,
                                 colors: ActionPickerColors {
                                     accent,
                                     warm,
@@ -1781,6 +1930,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 CreateFormRender {
                                     item,
                                     form,
+                                    keymap: &keymap,
                                     colors: ActionPickerColors {
                                         accent,
                                         warm,
@@ -1798,6 +1948,9 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
                 Event::Key(key) => {
+                    if key.kind == KeyEventKind::Release {
+                        continue;
+                    }
                     if create_modal.is_some() {
                         let selected_path =
                             create_modal_fixed_path(create_modal.as_ref()).or_else(|| {
@@ -1815,18 +1968,23 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         if let Some(modal) = create_modal.as_mut() {
                             match modal {
                                 CreateModal::Picker(picker) => {
-                                    if key.code == KeyCode::Esc
-                                        || (key.code == KeyCode::Char('c')
-                                            && key.modifiers.contains(KeyModifiers::CONTROL))
-                                    {
+                                    let binding =
+                                        keymap.resolve(BindingContext::CreatePicker, &key).cloned();
+                                    if matches!(binding, Some(BindingTarget::Disabled)) {
+                                        continue;
+                                    }
+                                    if matches!(
+                                        binding,
+                                        Some(BindingTarget::Core(CoreAction::Cancel))
+                                    ) {
                                         close_modal = true;
                                     } else {
                                         let visible_items = filtered_create_indexes(
                                             &create_settings.items,
                                             &picker.query,
                                         );
-                                        match key.code {
-                                            KeyCode::Enter => {
+                                        match binding {
+                                            Some(BindingTarget::Core(CoreAction::Confirm)) => {
                                                 if let Some(item_index) =
                                                     visible_items.get(picker.selected).copied()
                                                 {
@@ -1849,19 +2007,19 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                     }
                                                 }
                                             }
-                                            KeyCode::Up | KeyCode::Char('k') => {
+                                            Some(BindingTarget::Core(CoreAction::MoveUp)) => {
                                                 picker.selected = previous_picker_index(
                                                     picker.selected,
                                                     visible_items.len(),
                                                 );
                                             }
-                                            KeyCode::Down | KeyCode::Char('j') => {
+                                            Some(BindingTarget::Core(CoreAction::MoveDown)) => {
                                                 picker.selected = next_picker_index(
                                                     picker.selected,
                                                     visible_items.len(),
                                                 );
                                             }
-                                            KeyCode::Backspace => {
+                                            None if key.code == KeyCode::Backspace => {
                                                 picker.query.pop();
                                                 let visible_items = filtered_create_indexes(
                                                     &create_settings.items,
@@ -1872,10 +2030,13 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                     visible_items.len(),
                                                 );
                                             }
-                                            KeyCode::Char(value)
-                                                if key.modifiers.is_empty()
-                                                    || key.modifiers == KeyModifiers::SHIFT =>
+                                            None if matches!(key.code, KeyCode::Char(_))
+                                                && (key.modifiers.is_empty()
+                                                    || key.modifiers == KeyModifiers::SHIFT) =>
                                             {
+                                                let KeyCode::Char(value) = key.code else {
+                                                    unreachable!();
+                                                };
                                                 picker.query.push(value);
                                                 let visible_items = filtered_create_indexes(
                                                     &create_settings.items,
@@ -1886,45 +2047,61 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                     visible_items.len(),
                                                 );
                                             }
-                                            _ => {}
+                                            Some(_) | None => {}
                                         }
                                     }
                                 }
                                 CreateModal::Form(form) => {
                                     if let Some(item) = create_settings.items.get(form.item_index) {
-                                        if key.code == KeyCode::Esc {
+                                        let context = if form.focus == CreateFormFocus::Completions
+                                        {
+                                            BindingContext::CreateCompletions
+                                        } else {
+                                            BindingContext::CreateForm
+                                        };
+                                        let binding = keymap.resolve(context, &key).cloned();
+                                        if matches!(binding, Some(BindingTarget::Disabled)) {
+                                            continue;
+                                        }
+                                        if matches!(
+                                            binding,
+                                            Some(BindingTarget::Core(CoreAction::Back))
+                                        ) {
                                             *modal = CreateModal::Picker(CreatePicker {
                                                 selected: form.item_index,
                                                 query: String::new(),
                                                 fixed_path: form.fixed_path.clone(),
                                             });
-                                        } else if key.code == KeyCode::Char('c')
-                                            && key.modifiers.contains(KeyModifiers::CONTROL)
-                                        {
+                                        } else if matches!(
+                                            binding,
+                                            Some(BindingTarget::Core(CoreAction::Cancel))
+                                        ) {
                                             close_modal = true;
                                         } else {
-                                            match key.code {
-                                                KeyCode::Enter => {
+                                            match binding {
+                                                Some(BindingTarget::Core(CoreAction::Confirm)) => {
                                                     if let Some(values) =
                                                         collect_create_form_values(form, item)
                                                     {
                                                         start_create = Some((item.clone(), values));
                                                     }
                                                 }
-                                                KeyCode::Tab => {
+                                                Some(BindingTarget::Core(CoreAction::Accept)) => {
                                                     accept_create_path_suggestion(form);
                                                     update_create_path_suggestions(form, item);
                                                     form.focus = CreateFormFocus::Fields;
                                                 }
-                                                KeyCode::Right => {
+                                                Some(BindingTarget::Core(
+                                                    CoreAction::MoveRight,
+                                                )) => {
                                                     if !form.path_suggestions.is_empty() {
                                                         form.focus = CreateFormFocus::Completions;
                                                     }
                                                 }
-                                                KeyCode::Left => {
+                                                Some(BindingTarget::Core(CoreAction::MoveLeft)) => {
                                                     form.focus = CreateFormFocus::Fields;
                                                 }
-                                                KeyCode::Up => {
+                                                Some(BindingTarget::Core(CoreAction::MoveUp)) => {
                                                     if form.focus == CreateFormFocus::Completions {
                                                         form.selected_suggestion =
                                                             previous_picker_index(
@@ -1935,7 +2112,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                         move_create_form_prompt(form, item, false);
                                                     }
                                                 }
-                                                KeyCode::Down => {
+                                                Some(BindingTarget::Core(CoreAction::MoveDown)) => {
                                                     if form.focus == CreateFormFocus::Completions {
                                                         form.selected_suggestion =
                                                             next_picker_index(
@@ -1946,30 +2123,9 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                         move_create_form_prompt(form, item, true);
                                                     }
                                                 }
-                                                KeyCode::Char('k')
-                                                    if form.focus
-                                                        == CreateFormFocus::Completions =>
-                                                {
-                                                    form.selected_suggestion =
-                                                        previous_picker_index(
-                                                            form.selected_suggestion,
-                                                            form.path_suggestions.len(),
-                                                        );
-                                                }
-                                                KeyCode::Char('j')
-                                                    if form.focus
-                                                        == CreateFormFocus::Completions =>
-                                                {
-                                                    form.selected_suggestion = next_picker_index(
-                                                        form.selected_suggestion,
-                                                        form.path_suggestions.len(),
-                                                    );
-                                                }
-                                                KeyCode::Char('u')
-                                                    if key
-                                                        .modifiers
-                                                        .contains(KeyModifiers::CONTROL) =>
-                                                {
+                                                Some(BindingTarget::Core(
+                                                    CoreAction::ClearInput,
+                                                )) => {
                                                     if let Some(input) =
                                                         form.inputs.get_mut(form.active_prompt)
                                                     {
@@ -1983,7 +2139,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                     );
                                                     update_create_path_suggestions(form, item);
                                                 }
-                                                _ => {
+                                                None => {
                                                     let Some(input) =
                                                         form.inputs.get_mut(form.active_prompt)
                                                     else {
@@ -2001,6 +2157,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                                         update_create_path_suggestions(form, item);
                                                     }
                                                 }
+                                                Some(_) => {}
                                             }
                                         }
                                     } else {
@@ -2023,10 +2180,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         continue;
                     }
                     if action_picker.is_some() {
-                        if key.code == KeyCode::Esc
-                            || (key.code == KeyCode::Char('c')
-                                && key.modifiers.contains(KeyModifiers::CONTROL))
-                        {
+                        let binding = keymap.resolve(BindingContext::ActionPicker, &key).cloned();
+                        if matches!(binding, Some(BindingTarget::Disabled)) {
+                            continue;
+                        }
+                        if matches!(binding, Some(BindingTarget::Core(CoreAction::Cancel))) {
                             action_picker = None;
                             continue;
                         }
@@ -2046,19 +2204,25 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                             .map(|picker| {
                                 filtered_action_indexes(
                                     &action_settings.items,
+                                    action_settings.picker.as_deref(),
                                     &picker.query,
                                     picker_path.as_deref(),
                                 )
                             })
                             .unwrap_or_default();
-                        if key.code == KeyCode::Enter
-                            || matches_action_binding(&key, &action_settings.picker_bindings)
-                        {
+                        if matches!(
+                            binding,
+                            Some(BindingTarget::Core(
+                                CoreAction::Run | CoreAction::RunAndClose
+                            ))
+                        ) {
                             let Some(picker) = action_picker.as_ref() else {
                                 continue;
                             };
-                            let close_session =
-                                matches_action_binding(&key, &action_settings.picker_bindings);
+                            let close_session = matches!(
+                                binding,
+                                Some(BindingTarget::Core(CoreAction::RunAndClose))
+                            );
                             let action = visible_actions
                                 .get(picker.selected)
                                 .and_then(|index| action_settings.items.get(*index));
@@ -2071,8 +2235,8 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                             }
                             continue;
                         }
-                        match key.code {
-                            KeyCode::Up | KeyCode::Char('k') => {
+                        match binding {
+                            Some(BindingTarget::Core(CoreAction::MoveUp)) => {
                                 if let Some(picker) = action_picker.as_mut() {
                                     picker.selected = previous_picker_index(
                                         picker.selected,
@@ -2081,18 +2245,19 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 }
                                 continue;
                             }
-                            KeyCode::Down | KeyCode::Char('j') => {
+                            Some(BindingTarget::Core(CoreAction::MoveDown)) => {
                                 if let Some(picker) = action_picker.as_mut() {
                                     picker.selected =
                                         next_picker_index(picker.selected, visible_actions.len());
                                 }
                                 continue;
                             }
-                            KeyCode::Backspace => {
+                            None if key.code == KeyCode::Backspace => {
                                 if let Some(picker) = action_picker.as_mut() {
                                     picker.query.pop();
                                     let visible_actions = filtered_action_indexes(
                                         &action_settings.items,
+                                        action_settings.picker.as_deref(),
                                         &picker.query,
                                         picker_path.as_deref(),
                                     );
@@ -2100,14 +2265,18 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 }
                                 continue;
                             }
-                            KeyCode::Char(value)
-                                if key.modifiers.is_empty()
-                                    || key.modifiers == KeyModifiers::SHIFT =>
+                            None if matches!(key.code, KeyCode::Char(_))
+                                && (key.modifiers.is_empty()
+                                    || key.modifiers == KeyModifiers::SHIFT) =>
                             {
+                                let KeyCode::Char(value) = key.code else {
+                                    unreachable!();
+                                };
                                 if let Some(picker) = action_picker.as_mut() {
                                     picker.query.push(value);
                                     let visible_actions = filtered_action_indexes(
                                         &action_settings.items,
+                                        action_settings.picker.as_deref(),
                                         &picker.query,
                                         picker_path.as_deref(),
                                     );
@@ -2115,60 +2284,66 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 }
                                 continue;
                             }
-                            _ => continue,
+                            Some(_) | None => continue,
                         }
-                    }
-                    if key.code == KeyCode::Esc {
-                        if worktree_overlay.is_some() {
-                            if worktree_overlay
-                                .as_ref()
-                                .is_some_and(WorktreeOverlay::is_error)
-                            {
-                                worktree_overlay = None;
-                            }
-                            continue;
-                        }
-                        if create_overlay.is_some() {
-                            if create_overlay
-                                .as_ref()
-                                .is_some_and(WorktreeOverlay::is_error)
-                            {
-                                create_overlay = None;
-                            }
-                            continue;
-                        }
-                        terminal.show_cursor()?;
-                        return Ok(None);
-                    }
-                    if key.code == KeyCode::Char('c')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        terminal.show_cursor()?;
-                        return Ok(None);
                     }
                     if worktree_overlay.is_some() {
-                        if key.code == KeyCode::Enter
-                            && worktree_overlay
-                                .as_ref()
-                                .is_some_and(WorktreeOverlay::is_error)
-                        {
-                            worktree_overlay = None;
+                        let is_error = worktree_overlay
+                            .as_ref()
+                            .is_some_and(WorktreeOverlay::is_error);
+                        let context = if is_error {
+                            BindingContext::ErrorOverlay
+                        } else {
+                            BindingContext::ProgressOverlay
+                        };
+                        match keymap.resolve(context, &key) {
+                            Some(BindingTarget::Core(CoreAction::Cancel)) => {
+                                terminal.show_cursor()?;
+                                return Ok(None);
+                            }
+                            Some(BindingTarget::Core(
+                                CoreAction::Back | CoreAction::DismissOverlay,
+                            )) if is_error => worktree_overlay = None,
+                            Some(_) | None => {}
                         }
                         continue;
                     }
                     if create_overlay.is_some() {
-                        if key.code == KeyCode::Enter
-                            && create_overlay
-                                .as_ref()
-                                .is_some_and(WorktreeOverlay::is_error)
-                        {
-                            create_overlay = None;
+                        let is_error = create_overlay
+                            .as_ref()
+                            .is_some_and(WorktreeOverlay::is_error);
+                        let context = if is_error {
+                            BindingContext::ErrorOverlay
+                        } else {
+                            BindingContext::ProgressOverlay
+                        };
+                        match keymap.resolve(context, &key) {
+                            Some(BindingTarget::Core(CoreAction::Cancel)) => {
+                                terminal.show_cursor()?;
+                                return Ok(None);
+                            }
+                            Some(BindingTarget::Core(
+                                CoreAction::Back | CoreAction::DismissOverlay,
+                            )) if is_error => create_overlay = None,
+                            Some(_) | None => {}
                         }
                         continue;
                     }
-                    if matches_create_binding(&key, &create_settings.picker_bindings)
-                        && focus != Focus::TagEdit
-                    {
+                    let context = match focus {
+                        Focus::Search => BindingContext::Navigator,
+                        Focus::Preview => BindingContext::Preview,
+                        Focus::Detail => BindingContext::Detail,
+                        Focus::TagEdit => BindingContext::TagEditor,
+                    };
+                    let binding = keymap.resolve(context, &key).cloned();
+                    if matches!(binding, Some(BindingTarget::Disabled)) {
+                        continue;
+                    }
+                    if matches!(binding, Some(BindingTarget::Core(CoreAction::Cancel))) {
+                        terminal.show_cursor()?;
+                        return Ok(None);
+                    }
+                    if matches!(binding, Some(BindingTarget::Core(CoreAction::Create))) {
                         if !create_settings.items.is_empty() {
                             stick_to_first_result = false;
                             create_modal = Some(CreateModal::Picker(CreatePicker {
@@ -2179,22 +2354,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         }
                         continue;
                     }
-                    if matches_action_binding(&key, &action_settings.picker_bindings)
-                        && focus != Focus::TagEdit
-                    {
-                        if !action_settings.items.is_empty() {
-                            stick_to_first_result = false;
-                            action_picker = Some(ActionPicker {
-                                selected: 0,
-                                query: String::new(),
-                                fixed_path: None,
-                            });
-                        }
-                        continue;
-                    }
-                    if key.code == KeyCode::Char('y')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
+                    if matches!(binding, Some(BindingTarget::Core(CoreAction::CopyPath))) {
                         stick_to_first_result = false;
                         if let Some(value) = selection_path_for_action(
                             focus,
@@ -2207,10 +2367,10 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         }
                         continue;
                     }
-                    if key.code == KeyCode::Char('d')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                        && focus != Focus::TagEdit
-                    {
+                    if matches!(
+                        binding,
+                        Some(BindingTarget::Core(CoreAction::DeleteWorktree))
+                    ) {
                         let Some(entry) = current_selection_entry(&entries, &filtered, selected)
                             .filter(|entry| {
                                 matches!(entry.kind, NavigateEntryKind::Worktree { .. })
@@ -2227,10 +2387,10 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         start_worktree_deletion(entry, worktree_tx.clone());
                         continue;
                     }
-                    if key.code == KeyCode::Char('o')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                        && focus != Focus::TagEdit
-                    {
+                    if matches!(
+                        binding,
+                        Some(BindingTarget::Core(CoreAction::ToggleRemotes))
+                    ) {
                         stick_to_first_result = false;
                         let selected_id = current_selection_entry(&entries, &filtered, selected)
                             .map(|entry| entry.id.clone());
@@ -2278,10 +2438,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         list_offset = 0;
                         continue;
                     }
-                    if key.code == KeyCode::Char('t')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                        && focus != Focus::TagEdit
-                    {
+                    if matches!(binding, Some(BindingTarget::Core(CoreAction::EditTags))) {
                         stick_to_first_result = false;
                         if let Some(path) = current_selection_entry(&entries, &filtered, selected)
                             .map(|entry| entry.metadata_path.clone())
@@ -2295,12 +2452,13 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         }
                         continue;
                     }
-                    if key.code == KeyCode::Enter && focus != Focus::TagEdit {
+                    if let Some(target) = binding.as_ref().and_then(target_action_from_binding) {
                         stick_to_first_result = false;
                         if let Some(entry) = current_selection_entry(&entries, &filtered, selected)
                             .filter(|entry| is_remote_branch_entry(entry))
                             .cloned()
                         {
+                            pending_target_action = Some(target);
                             worktree_overlay = Some(WorktreeOverlay::new(
                                 branch_overlay_title(&entry, branch_settings.on_select),
                                 branch_overlay_first_message(branch_settings.on_select),
@@ -2320,16 +2478,27 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                             current_selection_entry(&entries, &filtered, selected),
                         );
                         if let Some(value) = value {
-                            terminal.show_cursor()?;
-                            return Ok(Some(NavigateOutcome::Navigate {
-                                path: value,
-                                close_session: false,
-                            }));
+                            match dispatch_target_action(&target, &value, &action_settings.items) {
+                                Ok(TargetActionDispatch::OpenActions) => {
+                                    action_picker = Some(ActionPicker {
+                                        selected: 0,
+                                        query: String::new(),
+                                        fixed_path: Some(value),
+                                    });
+                                }
+                                Ok(TargetActionDispatch::Exit(outcome)) => {
+                                    terminal.show_cursor()?;
+                                    return Ok(Some(outcome));
+                                }
+                                Err(message) => {
+                                    worktree_overlay =
+                                        Some(WorktreeOverlay::failed("Action failed", message));
+                                }
+                            }
                         }
+                        continue;
                     }
-                    if key.code == KeyCode::Char('s')
-                        && key.modifiers.contains(KeyModifiers::CONTROL)
-                    {
+                    if matches!(binding, Some(BindingTarget::Core(CoreAction::CycleSort))) {
                         sort_mode = sort_mode.next();
                         filtered = filter_and_sort_visible(
                             &entries,
@@ -2364,64 +2533,64 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                     }
 
                     match focus {
-                        Focus::Search => match key.code {
-                            KeyCode::Up => {
-                                let next = selected.saturating_sub(1);
-                                if next != selected {
-                                    stick_to_first_result = false;
-                                }
-                                selected = next;
-                            }
-                            KeyCode::Down => {
-                                if selected + 1 < filtered.len() {
-                                    selected += 1;
-                                    stick_to_first_result = false;
-                                }
-                            }
-                            KeyCode::Right
-                                if !key.modifiers.intersects(
-                                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                                ) && input_at_end(&input) =>
-                            {
-                                stick_to_first_result = false;
-                                focus = Focus::Preview;
-                            }
-                            _ => {
-                                let before = input.value().to_string();
-                                if key.modifiers.contains(KeyModifiers::SUPER) {
-                                    if key.code == KeyCode::Left {
-                                        input.handle(InputRequest::GoToStart);
-                                    } else if key.code == KeyCode::Right {
-                                        input.handle(InputRequest::GoToEnd);
+                        Focus::Search => {
+                            let before = input.value().to_string();
+                            match binding {
+                                Some(BindingTarget::Core(CoreAction::MoveUp)) => {
+                                    let next = selected.saturating_sub(1);
+                                    if next != selected {
+                                        stick_to_first_result = false;
                                     }
-                                } else if key.code == KeyCode::Char('u')
-                                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                                {
+                                    selected = next;
+                                }
+                                Some(BindingTarget::Core(CoreAction::MoveDown)) => {
+                                    if selected + 1 < filtered.len() {
+                                        selected += 1;
+                                        stick_to_first_result = false;
+                                    }
+                                }
+                                Some(BindingTarget::Core(CoreAction::MoveRight)) => {
+                                    if input_at_end(&input) {
+                                        stick_to_first_result = false;
+                                        focus = Focus::Preview;
+                                    } else if key.code == KeyCode::Right {
+                                        let _ = input.handle_event(&Event::Key(key));
+                                    }
+                                }
+                                Some(BindingTarget::Core(CoreAction::MoveHome)) => {
+                                    input.handle(InputRequest::GoToStart);
+                                }
+                                Some(BindingTarget::Core(CoreAction::MoveEnd)) => {
+                                    input.handle(InputRequest::GoToEnd);
+                                }
+                                Some(BindingTarget::Core(CoreAction::ClearInput)) => {
                                     input.handle(InputRequest::DeleteLine);
-                                } else {
+                                }
+                                None => {
                                     let _ = input.handle_event(&Event::Key(key));
                                 }
-                                if input.value() != before {
-                                    filtered = filter_and_sort_visible(
-                                        &entries,
-                                        input.value(),
-                                        sort_mode,
-                                        &meta_cache,
-                                        &tag_cache,
-                                        show_remote_branches,
-                                        pinned_path(
-                                            sort_settings.pin_current_project,
-                                            current_project_path.as_deref(),
-                                        ),
-                                    );
-                                    selected = 0;
-                                    stick_to_first_result = true;
-                                    list_offset = 0;
-                                }
+                                Some(_) => {}
                             }
-                        },
-                        Focus::TagEdit => match key.code {
-                            KeyCode::Enter => {
+                            if input.value() != before {
+                                filtered = filter_and_sort_visible(
+                                    &entries,
+                                    input.value(),
+                                    sort_mode,
+                                    &meta_cache,
+                                    &tag_cache,
+                                    show_remote_branches,
+                                    pinned_path(
+                                        sort_settings.pin_current_project,
+                                        current_project_path.as_deref(),
+                                    ),
+                                );
+                                selected = 0;
+                                stick_to_first_result = true;
+                                list_offset = 0;
+                            }
+                        }
+                        Focus::TagEdit => match binding {
+                            Some(BindingTarget::Core(CoreAction::Confirm)) => {
                                 commit_tag_input(
                                     &mut tag_input,
                                     &mut tag_edit_tags,
@@ -2457,33 +2626,52 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                     None => adjust_selected_index(selected, filtered.len()),
                                 };
                             }
-                            KeyCode::Tab => {
+                            Some(BindingTarget::Core(CoreAction::Accept)) => {
                                 commit_tag_input(
                                     &mut tag_input,
                                     &mut tag_edit_tags,
                                     &tag_suggestions,
                                 );
                             }
-                            KeyCode::Backspace if tag_input.value().is_empty() => {
+                            Some(BindingTarget::Core(CoreAction::RemoveLastTag))
+                                if tag_input.value().is_empty() =>
+                            {
                                 tag_edit_tags.pop();
                             }
-                            KeyCode::Backspace => {
+                            Some(BindingTarget::Core(CoreAction::ClearInput)) => {
+                                tag_input.reset();
+                            }
+                            Some(BindingTarget::Core(CoreAction::RemoveLastTag))
+                                if key.code == KeyCode::Backspace =>
+                            {
                                 let _ = tag_input.handle_event(&Event::Key(key));
                             }
-                            _ => {
+                            None => {
                                 let _ = tag_input.handle_event(&Event::Key(key));
                             }
+                            Some(_) => {}
                         },
                         Focus::Preview => {
                             let data = current.as_deref().and_then(|path| preview_cache.get(path));
-                            if let Some(change) = compositor.handle_preview_key(key, data) {
-                                focus = focus_from_change(change);
+                            match binding {
+                                Some(BindingTarget::Core(action)) => {
+                                    if let Some(change) =
+                                        compositor.handle_preview_action(action, data)
+                                    {
+                                        focus = focus_from_change(change);
+                                    }
+                                }
+                                None => compositor.handle_preview_editor_key(key, data),
+                                Some(_) => {}
                             }
                         }
                         Focus::Detail => {
                             let data = current.as_deref().and_then(|path| preview_cache.get(path));
-                            if let Some(change) = compositor.handle_detail_key(key, data) {
-                                focus = focus_from_change(change);
+                            if let Some(BindingTarget::Core(action)) = binding {
+                                if let Some(change) = compositor.handle_detail_action(action, data)
+                                {
+                                    focus = focus_from_change(change);
+                                }
                             }
                         }
                     }
@@ -2804,15 +2992,39 @@ fn delete_worktree_overlay_title(entry: &NavigateEntry) -> String {
     }
 }
 
+fn push_footer_hint(
+    spans: &mut Vec<Span<'static>>,
+    keymap: &Keymap,
+    context: BindingContext,
+    action: CoreAction,
+    description: &'static str,
+    colors: ActionPickerColors,
+) {
+    let Some(label) = keymap_binding_label(keymap, context, action) else {
+        return;
+    };
+    spans.push(Span::styled(
+        label,
+        Style::default()
+            .fg(colors.warm)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(description, Style::default().fg(colors.muted)));
+}
+
 fn render_worktree_overlay(
     frame: &mut ratatui::Frame,
     area: Rect,
     overlay: &WorktreeOverlay,
-    accent: Color,
-    warm: Color,
-    text: Color,
-    muted: Color,
+    keymap: &Keymap,
+    colors: ActionPickerColors,
 ) {
+    let ActionPickerColors {
+        accent,
+        warm,
+        text,
+        muted,
+    } = colors;
     let width = area.width.saturating_mul(2).saturating_div(3).clamp(48, 96);
     let height = area
         .height
@@ -2893,7 +3105,15 @@ fn render_worktree_overlay(
             lines.push('\n');
         }
         lines.push_str(error);
-        lines.push_str("\n\nPress Enter or Esc to dismiss");
+        let dismissal_labels = [CoreAction::DismissOverlay, CoreAction::Back]
+            .into_iter()
+            .filter_map(|action| keymap_binding_label(keymap, BindingContext::ErrorOverlay, action))
+            .collect::<Vec<_>>();
+        if !dismissal_labels.is_empty() {
+            lines.push_str("\n\nPress ");
+            lines.push_str(&dismissal_labels.join(" or "));
+            lines.push_str(" to dismiss");
+        }
     }
     let messages = Paragraph::new(lines)
         .style(Style::default().fg(if overlay.error.is_some() { warm } else { text }))
@@ -2913,7 +3133,7 @@ fn render_action_picker(frame: &mut ratatui::Frame, area: Rect, render: ActionPi
         visible_actions,
         selected,
         query,
-        action_binding_label,
+        keymap,
         colors,
     } = render;
     let content_width = actions
@@ -3017,32 +3237,39 @@ fn render_action_picker(frame: &mut ratatui::Frame, area: Rect, render: ActionPi
             .add_modifier(Modifier::BOLD),
     );
     let mut state = ListState::default();
-    state.select(selected.checked_sub(offset));
+    state.select(picker_list_selection(
+        visible_actions.len(),
+        selected,
+        offset,
+    ));
     frame.render_stateful_widget(list, list_area, &mut state);
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Enter",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" run  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            action_binding_label.to_string(),
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" run+close  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" close", Style::default().fg(colors.muted)),
-    ]));
+    let mut footer_spans = Vec::new();
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        BindingContext::ActionPicker,
+        CoreAction::Run,
+        " run  ",
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        BindingContext::ActionPicker,
+        CoreAction::RunAndClose,
+        " run+close  ",
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        BindingContext::ActionPicker,
+        CoreAction::Cancel,
+        " close",
+        colors,
+    );
+    let footer = Paragraph::new(Line::from(footer_spans));
     frame.render_widget(footer, footer_area);
 }
 
@@ -3052,7 +3279,7 @@ fn render_create_picker(frame: &mut ratatui::Frame, area: Rect, render: CreatePi
         visible_items,
         selected,
         query,
-        create_binding_label,
+        keymap,
         colors,
     } = render;
     let content_width = items
@@ -3155,34 +3382,34 @@ fn render_create_picker(frame: &mut ratatui::Frame, area: Rect, render: CreatePi
     state.select(selected.checked_sub(offset));
     frame.render_stateful_widget(list, list_area, &mut state);
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "Enter",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" choose  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            create_binding_label.to_string(),
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" open  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" close", Style::default().fg(colors.muted)),
-    ]));
+    let mut footer_spans = Vec::new();
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        BindingContext::CreatePicker,
+        CoreAction::Confirm,
+        " choose  ",
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        BindingContext::CreatePicker,
+        CoreAction::Cancel,
+        " close",
+        colors,
+    );
+    let footer = Paragraph::new(Line::from(footer_spans));
     frame.render_widget(footer, footer_area);
 }
 
 fn render_create_form(frame: &mut ratatui::Frame, area: Rect, render: CreateFormRender<'_>) {
-    let CreateFormRender { item, form, colors } = render;
+    let CreateFormRender {
+        item,
+        form,
+        keymap,
+        colors,
+    } = render;
     let active_prompt = item.prompts.get(form.active_prompt);
     let show_suggestions = active_prompt
         .is_some_and(|prompt| prompt.kind == CreatePromptKind::Path)
@@ -3293,50 +3520,74 @@ fn render_create_form(frame: &mut ratatui::Frame, area: Rect, render: CreateForm
         }
     }
     lines.push(Line::from(Span::raw("")));
-    lines.push(Line::from(vec![
-        Span::styled(
-            "Enter",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" run  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "Up/Down",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" field  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "Right/Left",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" completions  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "Tab",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" accept  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "j/k",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" pick  ", Style::default().fg(colors.muted)),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(colors.warm)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" back", Style::default().fg(colors.muted)),
-    ]));
+    let binding_context = if form.focus == CreateFormFocus::Completions {
+        BindingContext::CreateCompletions
+    } else {
+        BindingContext::CreateForm
+    };
+    let mut footer_spans = Vec::new();
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::Confirm,
+        " run  ",
+        colors,
+    );
+    let (up_description, down_description) = if form.focus == CreateFormFocus::Completions {
+        (" previous  ", " next  ")
+    } else {
+        (" previous field  ", " next field  ")
+    };
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::MoveUp,
+        up_description,
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::MoveDown,
+        down_description,
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::MoveRight,
+        " completions  ",
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::MoveLeft,
+        " fields  ",
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::Accept,
+        " accept  ",
+        colors,
+    );
+    push_footer_hint(
+        &mut footer_spans,
+        keymap,
+        binding_context,
+        CoreAction::Back,
+        " back",
+        colors,
+    );
+    lines.push(Line::from(footer_spans));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), form_area);
     if let Some(area) = suggestion_area {
@@ -3617,6 +3868,123 @@ mod tests {
     use ratatui::text::Line;
 
     #[test]
+    fn config_entries_are_repeatable_and_removed_from_positionals() {
+        let args = vec![
+            "--config-entry".to_string(),
+            "keybindings.navigator.enter=\"actions\"".to_string(),
+            "navigate".to_string(),
+            "--config-entry=sort.default=\"alpha-asc\"".to_string(),
+        ];
+
+        let (positionals, entries) = split_config_entries(&args).expect("valid entries");
+
+        assert_eq!(positionals, vec!["navigate"]);
+        assert_eq!(
+            entries,
+            vec![
+                "keybindings.navigator.enter=\"actions\"",
+                "sort.default=\"alpha-asc\""
+            ]
+        );
+    }
+
+    #[test]
+    fn config_entry_requires_a_non_empty_value() {
+        assert!(split_config_entries(&["--config-entry".to_string()]).is_err());
+        assert!(split_config_entries(&["--config-entry=".to_string()]).is_err());
+    }
+
+    #[test]
+    fn target_action_dispatch_uses_the_prepared_target_path() {
+        assert!(matches!(
+            dispatch_target_action(&TargetAction::Actions, "/repos/project", &[]),
+            Ok(TargetActionDispatch::OpenActions)
+        ));
+        assert!(matches!(
+            dispatch_target_action(&TargetAction::Navigate, "/repos/project", &[]),
+            Ok(TargetActionDispatch::Exit(NavigateOutcome::Navigate {
+                path,
+                close_session: false,
+            })) if path == "/repos/project"
+        ));
+
+        let action = ActionDefinition {
+            id: Some("open-editor".to_string()),
+            label: "Open editor".to_string(),
+            icon: None,
+            file_condition: None,
+            kind: ActionKind::Command {
+                command: "editor".to_string(),
+                args: vec!["{path}".to_string()],
+                current_dir: Some("{path}".to_string()),
+            },
+        };
+        assert!(matches!(
+            dispatch_target_action(
+                &TargetAction::Configured("open-editor".to_string()),
+                "/repos/project",
+                &[action],
+            ),
+            Ok(TargetActionDispatch::Exit(NavigateOutcome::RunAction {
+                action: ResolvedAction::Command {
+                    command,
+                    args,
+                    current_dir: Some(current_dir),
+                },
+                close_session: false,
+            })) if command == "editor"
+                && args == vec!["/repos/project"]
+                && current_dir.as_path() == Path::new("/repos/project")
+        ));
+
+        let open_url = ActionDefinition {
+            id: Some("open-docs".to_string()),
+            label: "Open docs".to_string(),
+            icon: None,
+            file_condition: None,
+            kind: ActionKind::OpenUrl {
+                url: "https://example.com".to_string(),
+            },
+        };
+        assert!(matches!(
+            dispatch_target_action(
+                &TargetAction::Configured("open-docs".to_string()),
+                "/repos/project",
+                &[open_url],
+            ),
+            Ok(TargetActionDispatch::Exit(NavigateOutcome::RunAction {
+                action: ResolvedAction::OpenUrl(url),
+                close_session: false,
+            })) if url == "https://example.com"
+        ));
+
+        let unavailable = ActionDefinition {
+            id: Some("unavailable".to_string()),
+            label: "Unavailable".to_string(),
+            icon: None,
+            file_condition: Some("missing-file".to_string()),
+            kind: ActionKind::Navigate,
+        };
+        assert!(dispatch_target_action(
+            &TargetAction::Configured("unavailable".to_string()),
+            "/path/that/does/not/exist",
+            &[unavailable],
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn pending_target_action_is_consumed_exactly_once() {
+        let mut pending = Some(TargetAction::Actions);
+
+        assert_eq!(
+            take_pending_target_action(&mut pending).expect("pending action"),
+            TargetAction::Actions
+        );
+        assert!(take_pending_target_action(&mut pending).is_err());
+    }
+
+    #[test]
     fn parses_git_worktree_porcelain_with_bare_and_branch_entries() {
         let output = "worktree /repos/example.git\nbare\n\nworktree /repos/example\nHEAD 123456\nbranch refs/heads/main\n\nworktree /repos/example-feature\nHEAD abcdef\nbranch refs/heads/feature/worktree\n";
 
@@ -3810,9 +4178,15 @@ mod tests {
     }
 
     #[test]
+    fn empty_action_picker_has_no_selected_row() {
+        assert_eq!(picker_list_selection(0, 0, 0), None);
+        assert_eq!(picker_list_selection(2, 1, 0), Some(1));
+    }
+
+    #[test]
     fn action_picker_filters_by_search_query() {
         let actions = model::default_action_definitions();
-        let indexes = filtered_action_indexes(&actions, "code", Some("/tmp"));
+        let indexes = filtered_action_indexes(&actions, None, "code", Some("/tmp"));
         let labels = indexes
             .iter()
             .map(|index| actions[*index].label.as_str())
@@ -3822,34 +4196,19 @@ mod tests {
     }
 
     #[test]
-    fn action_bindings_match_ctrl_enter_and_ctrl_space() {
-        let bindings = model::default_action_picker_bindings();
-        assert!(matches_action_binding(
-            &KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL),
-            &bindings
-        ));
-        assert!(matches_action_binding(
-            &KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL),
-            &bindings
-        ));
-        assert!(!matches_action_binding(
-            &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-            &bindings
-        ));
-    }
+    fn action_picker_allowlist_filters_and_orders_actions() {
+        let actions = model::default_action_definitions();
+        let picker = vec![
+            "open-opencode-session".to_string(),
+            "open-vs-code".to_string(),
+        ];
+        let indexes = filtered_action_indexes(&actions, Some(&picker), "", Some("/tmp"));
+        let labels = indexes
+            .iter()
+            .map(|index| actions[*index].label.as_str())
+            .collect::<Vec<_>>();
 
-    #[test]
-    fn create_binding_matches_ctrl_n() {
-        let bindings = model::default_create_picker_bindings();
-
-        assert!(matches_create_binding(
-            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-            &bindings
-        ));
-        assert!(!matches_create_binding(
-            &KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
-            &bindings
-        ));
+        assert_eq!(labels, vec!["Open OpenCode session", "Open VS Code"]);
     }
 
     #[test]
@@ -4045,6 +4404,7 @@ mod tests {
     #[test]
     fn picker_ctrl_enter_marks_action_for_session_close() {
         let action = ActionDefinition {
+            id: None,
             label: "Navigate".to_string(),
             icon: None,
             file_condition: None,

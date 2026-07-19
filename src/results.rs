@@ -63,8 +63,10 @@ struct RemoteBranchCacheRepo {
     branches: Vec<String>,
 }
 
-pub(crate) fn build_items() -> AppResult<BuildItemsResult> {
-    let config = load_config()?;
+pub(crate) fn build_items_with_config_entries(
+    config_entries: &[String],
+) -> AppResult<BuildItemsResult> {
+    let config = load_config(config_entries)?;
     let project_provider =
         ProjectResultProvider::from_config_paths(config.static_items, config.index_folders);
     let mut entries = project_provider.initial_entries();
@@ -81,6 +83,7 @@ pub(crate) fn build_items() -> AppResult<BuildItemsResult> {
         action_settings: config.action_settings,
         create_settings: config.create_settings,
         theme_colors: config.theme_colors,
+        keymap: config.keymap,
     })
 }
 

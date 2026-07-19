@@ -7,11 +7,6 @@ _navgator_bin() {
     return 0
   fi
 
-  if command -v navgator >/dev/null 2>&1; then
-    command -v navgator
-    return 0
-  fi
-
   if [[ -x "$_NAVGATOR_SCRIPT_DIR/../target/release/navgator" ]]; then
     echo "$_NAVGATOR_SCRIPT_DIR/../target/release/navgator"
     return 0
@@ -19,6 +14,11 @@ _navgator_bin() {
 
   if [[ -x "$_NAVGATOR_SCRIPT_DIR/../target/debug/navgator" ]]; then
     echo "$_NAVGATOR_SCRIPT_DIR/../target/debug/navgator"
+    return 0
+  fi
+
+  if command -v navgator >/dev/null 2>&1; then
+    command -v navgator
     return 0
   fi
 

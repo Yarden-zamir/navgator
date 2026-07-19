@@ -4,6 +4,11 @@ use ratatui::{layout::Rect, style::Color, text::Text};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, error::Error, path::PathBuf};
 
+#[path = "keybindings.rs"]
+pub(crate) mod keybindings;
+
+use keybindings::Keymap;
+
 pub(crate) type AppResult<T> = Result<T, Box<dyn Error>>;
 pub(crate) type MatchScore = (usize, usize, usize, usize, usize);
 
@@ -191,6 +196,7 @@ pub(crate) struct BuildItemsResult {
     pub(crate) action_settings: ActionSettings,
     pub(crate) create_settings: CreateSettings,
     pub(crate) theme_colors: ThemeColors,
+    pub(crate) keymap: Keymap,
 }
 
 pub(crate) enum ResultUpdate {
@@ -217,11 +223,13 @@ pub(crate) struct LoadedConfig {
     pub(crate) action_settings: ActionSettings,
     pub(crate) create_settings: CreateSettings,
     pub(crate) theme_colors: ThemeColors,
+    pub(crate) keymap: Keymap,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActionSettings {
     pub(crate) items: Vec<ActionDefinition>,
+    pub(crate) picker: Option<Vec<String>>,
     pub(crate) picker_bindings: Vec<ActionBinding>,
 }
 
@@ -271,6 +279,7 @@ pub(crate) enum CreatePromptKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActionDefinition {
+    pub(crate) id: Option<String>,
     pub(crate) label: String,
     pub(crate) icon: Option<String>,
     pub(crate) file_condition: Option<String>,
@@ -294,6 +303,7 @@ impl Default for ActionSettings {
     fn default() -> Self {
         Self {
             items: default_action_definitions(),
+            picker: None,
             picker_bindings: default_action_picker_bindings(),
         }
     }
@@ -331,12 +341,14 @@ pub(crate) fn default_create_picker_bindings() -> Vec<ActionBinding> {
 pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
     vec![
         ActionDefinition {
+            id: Some("navigate-to".to_string()),
             label: "Navigate to".to_string(),
             icon: Some("󰁔".to_string()),
             file_condition: None,
             kind: ActionKind::Navigate,
         },
         ActionDefinition {
+            id: Some("open-github-desktop".to_string()),
             label: "Open GitHub Desktop".to_string(),
             icon: Some("󰊢".to_string()),
             file_condition: Some(".git".to_string()),
@@ -351,6 +363,7 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
             },
         },
         ActionDefinition {
+            id: Some("open-vs-code".to_string()),
             label: "Open VS Code".to_string(),
             icon: Some("󰨞".to_string()),
             file_condition: None,
@@ -365,6 +378,7 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
             },
         },
         ActionDefinition {
+            id: Some("open-intellij".to_string()),
             label: "Open IntelliJ".to_string(),
             icon: Some("".to_string()),
             file_condition: None,
@@ -375,6 +389,7 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
             },
         },
         ActionDefinition {
+            id: Some("open-repo-online".to_string()),
             label: "Open repo online".to_string(),
             icon: Some("󰖟".to_string()),
             file_condition: Some(".git".to_string()),
@@ -383,6 +398,7 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
             },
         },
         ActionDefinition {
+            id: Some("open-claude-session".to_string()),
             label: "Open Claude session".to_string(),
             icon: Some("󰚩".to_string()),
             file_condition: None,
@@ -393,6 +409,7 @@ pub(crate) fn default_action_definitions() -> Vec<ActionDefinition> {
             },
         },
         ActionDefinition {
+            id: Some("open-opencode-session".to_string()),
             label: "Open OpenCode session".to_string(),
             icon: Some("󰘦".to_string()),
             file_condition: None,
@@ -601,7 +618,8 @@ pub(crate) enum Focus {
 }
 
 #[derive(Clone)]
-pub(crate) struct HelpContext {
+pub(crate) struct HelpContext<'a> {
+    pub(crate) keymap: &'a Keymap,
     pub(crate) focus: Focus,
     pub(crate) sort_mode: SortMode,
     pub(crate) remote_state: RemoteToggleState,
@@ -616,8 +634,6 @@ pub(crate) struct HelpContext {
     pub(crate) detail_tab_index: usize,
     pub(crate) detail_tab_count: usize,
     pub(crate) detail_scroll: usize,
-    pub(crate) action_binding_label: String,
-    pub(crate) create_binding_label: String,
 }
 
 #[derive(Clone, Copy)]

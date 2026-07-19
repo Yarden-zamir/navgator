@@ -1,4 +1,5 @@
 use crate::content::{apply_preview_data, preview_tab_visible_indexes, ApplyPreviewData};
+use crate::model::keybindings::CoreAction;
 use crate::model::{DetailTab, Focus, PreviewData};
 use crate::search::entry_name;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -60,53 +61,26 @@ impl CurrentCompositor {
         }
     }
 
-    pub(crate) fn handle_preview_key(
+    pub(crate) fn handle_preview_action(
         &mut self,
-        key: KeyEvent,
+        action: CoreAction,
         data: Option<&PreviewData>,
     ) -> Option<FocusChange> {
-        match key.code {
-            KeyCode::Char('u')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !self.worktree_filter.value().is_empty() =>
-            {
+        match action {
+            CoreAction::ClearInput if !self.worktree_filter.value().is_empty() => {
                 self.worktree_filter.reset();
                 self.reset_active_preview_position();
                 if let Some(data) = data {
                     self.apply_preview(data);
                 }
             }
-            KeyCode::Char(_)
-                if !key.modifiers.intersects(
-                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
-                ) =>
-            {
-                let before = self.worktree_filter.value().to_string();
-                let _ = self.worktree_filter.handle_event(&Event::Key(key));
-                if self.worktree_filter.value() != before {
-                    self.reset_active_preview_position();
-                    if let Some(data) = data {
-                        self.apply_preview(data);
-                    }
-                }
-            }
-            KeyCode::Backspace if !self.worktree_filter.value().is_empty() => {
-                let before = self.worktree_filter.value().to_string();
-                let _ = self.worktree_filter.handle_event(&Event::Key(key));
-                if self.worktree_filter.value() != before {
-                    self.reset_active_preview_position();
-                    if let Some(data) = data {
-                        self.apply_preview(data);
-                    }
-                }
-            }
-            KeyCode::Left => {
+            CoreAction::MoveLeft => {
                 if self.move_preview_tab(data, -1) {
                     return None;
                 }
                 return Some(FocusChange::Search);
             }
-            KeyCode::Right => {
+            CoreAction::MoveRight => {
                 if self.move_preview_tab(data, 1) {
                     return None;
                 }
@@ -114,7 +88,7 @@ impl CurrentCompositor {
                     return Some(FocusChange::Detail);
                 }
             }
-            KeyCode::Up => {
+            CoreAction::MoveUp => {
                 if self.preview_scroll > 0 {
                     self.preview_scroll -= 1;
                 } else if self.move_preview_tab(data, -1) {
@@ -123,7 +97,7 @@ impl CurrentCompositor {
                     return Some(FocusChange::Search);
                 }
             }
-            KeyCode::Down => {
+            CoreAction::MoveDown => {
                 if self.preview_scroll < self.preview_max_scroll {
                     self.preview_scroll += 1;
                 } else if self.move_preview_tab(data, 1) {
@@ -132,17 +106,17 @@ impl CurrentCompositor {
                     return Some(FocusChange::Detail);
                 }
             }
-            KeyCode::PageUp => {
+            CoreAction::PageUp => {
                 self.preview_scroll = self.preview_scroll.saturating_sub(self.preview_page_step);
             }
-            KeyCode::PageDown => {
+            CoreAction::PageDown => {
                 self.preview_scroll =
                     (self.preview_scroll + self.preview_page_step).min(self.preview_max_scroll);
             }
-            KeyCode::Home => {
+            CoreAction::MoveHome => {
                 self.preview_scroll = 0;
             }
-            KeyCode::End => {
+            CoreAction::MoveEnd => {
                 self.preview_scroll = self.preview_max_scroll;
             }
             _ => {}
@@ -150,13 +124,32 @@ impl CurrentCompositor {
         None
     }
 
-    pub(crate) fn handle_detail_key(
+    pub(crate) fn handle_preview_editor_key(&mut self, key: KeyEvent, data: Option<&PreviewData>) {
+        let accepts_key = matches!(key.code, KeyCode::Char(_))
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+            || key.code == KeyCode::Backspace && !self.worktree_filter.value().is_empty();
+        if !accepts_key {
+            return;
+        }
+        let before = self.worktree_filter.value().to_string();
+        let _ = self.worktree_filter.handle_event(&Event::Key(key));
+        if self.worktree_filter.value() != before {
+            self.reset_active_preview_position();
+            if let Some(data) = data {
+                self.apply_preview(data);
+            }
+        }
+    }
+
+    pub(crate) fn handle_detail_action(
         &mut self,
-        key: KeyEvent,
+        action: CoreAction,
         data: Option<&PreviewData>,
     ) -> Option<FocusChange> {
-        match key.code {
-            KeyCode::Left => {
+        match action {
+            CoreAction::MoveLeft => {
                 if self.detail_tab_index > 0 {
                     self.detail_tab_index -= 1;
                     self.detail_scroll = 0;
@@ -170,7 +163,7 @@ impl CurrentCompositor {
                     return Some(FocusChange::Preview);
                 }
             }
-            KeyCode::Right => {
+            CoreAction::MoveRight => {
                 if self.detail_tab_index + 1 < self.detail_tabs.len() {
                     self.detail_tab_index += 1;
                     self.detail_scroll = 0;
@@ -178,27 +171,27 @@ impl CurrentCompositor {
                     return Some(FocusChange::Preview);
                 }
             }
-            KeyCode::Up => {
+            CoreAction::MoveUp => {
                 if self.detail_scroll > 0 {
                     self.detail_scroll -= 1;
                 } else {
                     return Some(FocusChange::Preview);
                 }
             }
-            KeyCode::Down if self.detail_scroll < self.detail_max_scroll => {
+            CoreAction::MoveDown if self.detail_scroll < self.detail_max_scroll => {
                 self.detail_scroll += 1;
             }
-            KeyCode::PageUp => {
+            CoreAction::PageUp => {
                 self.detail_scroll = self.detail_scroll.saturating_sub(self.detail_page_step);
             }
-            KeyCode::PageDown => {
+            CoreAction::PageDown => {
                 self.detail_scroll =
                     (self.detail_scroll + self.detail_page_step).min(self.detail_max_scroll);
             }
-            KeyCode::Home => {
+            CoreAction::MoveHome => {
                 self.detail_scroll = 0;
             }
-            KeyCode::End => {
+            CoreAction::MoveEnd => {
                 self.detail_scroll = self.detail_max_scroll;
             }
             _ => {}

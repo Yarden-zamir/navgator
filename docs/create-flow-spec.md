@@ -1,6 +1,7 @@
-1. The create picker is a modal opened from the main navigator UI with configured create bindings.
-2. Create bindings default to Ctrl+N.
-3. The UI shows only the first configured create binding.
+1. The create picker is a modal opened from the main navigator UI with a `create` binding.
+1. Key names in this spec describe the runtime default keymap and may be remapped by configuration.
+2. The default navigator keymap binds `create` to Ctrl+N.
+3. The UI shows the first resolved binding for create commands.
 4. `navgator create` opens directly to the create picker.
 5. `navgator create` uses the current directory as the selected path for `{path}` and `NAVGATOR_SELECTED_PATH`.
 6. `navgator create <recipe>` opens directly to the matching create recipe.
