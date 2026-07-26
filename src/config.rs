@@ -1369,6 +1369,36 @@ on_select = "checkout"
     }
 
     #[test]
+    fn missing_navgator_config_is_created_at_that_exact_path() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let old_navgator = env::var("NAVGATOR_CONFIG").ok();
+        let path = env::temp_dir().join(format!(
+            "navgator-starter-{}-{}/config.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        env::set_var("NAVGATOR_CONFIG", &path);
+
+        let loaded = load_config(&[]);
+
+        let contents = fs::read_to_string(&path);
+        restore_env("NAVGATOR_CONFIG", old_navgator);
+        if let Some(parent) = path.parent() {
+            let _ = fs::remove_dir_all(parent);
+        }
+
+        assert!(loaded.is_ok(), "starter config should load");
+        let contents = contents.expect("starter config should be written to the override path");
+        assert!(
+            contents.starts_with(&format!("\"$schema\" = \"{CONFIG_SCHEMA_URL}\"")),
+            "starter config must begin with the schema line, got: {contents:.80}"
+        );
+    }
+
+    #[test]
     fn empty_xdg_config_home_uses_home_config_dir() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let old_navgator = env::var("NAVGATOR_CONFIG").ok();
