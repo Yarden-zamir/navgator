@@ -844,8 +844,7 @@ impl ConfigLoadState {
 
 impl ConfigKeybindings {
     fn into_keymap(self) -> AppResult<Keymap> {
-        let mut keymap = Keymap::default();
-        for (context, table) in [
+        let tables = [
             (BindingContext::Global, self.global),
             (BindingContext::Navigator, self.navigator),
             (BindingContext::Preview, self.preview),
@@ -857,35 +856,10 @@ impl ConfigKeybindings {
             (BindingContext::CreateCompletions, self.create_completions),
             (BindingContext::ProgressOverlay, self.progress_overlay),
             (BindingContext::ErrorOverlay, self.error_overlay),
-        ] {
-            let Some(table) = table else {
-                continue;
-            };
-            let mut seen = HashSet::new();
-            for (raw_chord, raw_target) in table {
-                let chord = KeyChord::parse(&raw_chord).map_err(|error| {
-                    format!(
-                        "Invalid key chord {raw_chord:?} in [keybindings.{}]: {error}",
-                        context.as_str()
-                    )
-                })?;
-                if !seen.insert(chord) {
-                    return Err(format!(
-                        "Duplicate canonical key chord {chord} in [keybindings.{}]",
-                        context.as_str()
-                    )
-                    .into());
-                }
-                let target = BindingTarget::parse(&raw_target).map_err(|error| {
-                    format!(
-                        "Invalid keybinding target {raw_target:?} in [keybindings.{}]: {error}",
-                        context.as_str()
-                    )
-                })?;
-                keymap.set(context, Binding::new(chord, target));
-            }
-        }
-        Ok(keymap)
+        ]
+        .into_iter()
+        .filter_map(|(context, table)| table.map(|table| (context, table)));
+        gator::keymap::layer_from_tables(tables).map_err(Into::into)
     }
 }
 

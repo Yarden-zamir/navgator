@@ -1,5 +1,5 @@
 use crate::metadata::{format_date_display, format_epoch_minutes};
-use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, KeyChord, Keymap};
+use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, Keymap};
 use crate::model::{
     Focus, HelpColors, HelpContext, PreviewSettings, RemoteToggleState, SidePanelRender, UiLayout,
     VisibleListArgs, DATE_PLACEHOLDER, MIN_PARTIAL_TAB_WIDTH, TAB_DIVIDER_WIDTH,
@@ -26,44 +26,7 @@ pub(crate) fn keymap_binding_label(
         .map(format_chord_label)
 }
 
-fn format_chord_label(chord: KeyChord) -> String {
-    let canonical = chord.as_str();
-    let has_modifiers = canonical.contains('+');
-    canonical
-        .split('+')
-        .map(|part| match part {
-            "ctrl" => "Ctrl".to_string(),
-            "alt" => "Alt".to_string(),
-            "shift" => "Shift".to_string(),
-            "super" => "Super".to_string(),
-            "enter" => "Enter".to_string(),
-            "space" => "Space".to_string(),
-            "tab" => "Tab".to_string(),
-            "backtab" => "BackTab".to_string(),
-            "esc" => "Esc".to_string(),
-            "backspace" => "Backspace".to_string(),
-            "delete" => "Delete".to_string(),
-            "insert" => "Insert".to_string(),
-            "left" => "Left".to_string(),
-            "right" => "Right".to_string(),
-            "up" => "Up".to_string(),
-            "down" => "Down".to_string(),
-            "home" => "Home".to_string(),
-            "end" => "End".to_string(),
-            "pageup" => "PageUp".to_string(),
-            "pagedown" => "PageDown".to_string(),
-            _ if part
-                .strip_prefix('f')
-                .is_some_and(|number| number.bytes().all(|byte| byte.is_ascii_digit())) =>
-            {
-                part.to_ascii_uppercase()
-            }
-            _ if has_modifiers && part.chars().count() == 1 => part.to_ascii_uppercase(),
-            _ => part.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("+")
-}
+use gator::keymap::format_chord_label;
 
 fn push_help_hint(
     spans: &mut Vec<Span<'static>>,
@@ -1399,7 +1362,7 @@ fn render_preview_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::keybindings::{default_keymap, Binding};
+    use crate::model::keybindings::{default_keymap, Binding, KeyChord};
     use crossterm::event::{KeyCode, KeyModifiers};
 
     fn help_context(keymap: &Keymap, focus: Focus) -> HelpContext<'_> {
