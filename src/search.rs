@@ -43,12 +43,18 @@ pub(crate) fn filter_and_sort(
     sort_mode: SortMode,
     meta_cache: &HashMap<String, SortMeta>,
     tag_cache: &HashMap<String, Vec<String>>,
+    ignored_paths: Option<&std::collections::HashSet<String>>,
 ) -> Vec<usize> {
-    if sort_mode == SortMode::Match {
-        return filter_and_sort_by_match(entries, query, tag_cache);
+    let mut indices = if sort_mode == SortMode::Match {
+        filter_and_sort_by_match(entries, query, tag_cache)
+    } else {
+        let mut indices = filter_indices(entries, query, tag_cache);
+        sort_indices(&mut indices, entries, sort_mode, meta_cache);
+        indices
+    };
+    if let Some(ignored_paths) = ignored_paths {
+        indices.sort_by_key(|index| ignored_paths.contains(&entries[*index].metadata_path));
     }
-    let mut indices = filter_indices(entries, query, tag_cache);
-    sort_indices(&mut indices, entries, sort_mode, meta_cache);
     indices
 }
 
@@ -301,6 +307,14 @@ fn compare_indices(
             compare_time(left_path, right_path, meta_cache, TimeField::Modified, true)
                 .then_with(|| compare_entry_names(left_entry, right_entry))
         }
+        SortMode::AccessedDesc => {
+            compare_time(left_path, right_path, meta_cache, TimeField::Accessed, true)
+                .then_with(|| compare_entry_names(left_entry, right_entry))
+        }
+        SortMode::Recents => {
+            compare_time(left_path, right_path, meta_cache, TimeField::Recent, true)
+                .then_with(|| compare_entry_names(left_entry, right_entry))
+        }
     }
 }
 
@@ -313,6 +327,8 @@ fn compare_entry_names(left: &NavigateEntry, right: &NavigateEntry) -> Ordering 
 enum TimeField {
     Created,
     Modified,
+    Accessed,
+    Recent,
 }
 
 fn compare_time(
@@ -327,6 +343,8 @@ fn compare_time(
         match field {
             TimeField::Created => meta.created_epoch,
             TimeField::Modified => meta.modified_epoch,
+            TimeField::Accessed => meta.accessed_epoch,
+            TimeField::Recent => meta.recent_epoch(),
         }
     };
 
@@ -432,7 +450,8 @@ mod tests {
                 "Alice",
                 SortMode::Match,
                 &HashMap::new(),
-                &HashMap::new()
+                &HashMap::new(),
+                None
             ),
             vec![0]
         );
@@ -450,6 +469,7 @@ mod tests {
             SortMeta {
                 modified_epoch: Some(200),
                 created_epoch: Some(100),
+                accessed_epoch: None,
             },
         );
         meta_cache.insert(
@@ -457,6 +477,7 @@ mod tests {
             SortMeta {
                 modified_epoch: None,
                 created_epoch: None,
+                accessed_epoch: None,
             },
         );
 
@@ -466,9 +487,148 @@ mod tests {
                 "",
                 SortMode::ModifiedDesc,
                 &meta_cache,
-                &HashMap::new()
+                &HashMap::new(),
+                None
             ),
             vec![1, 0]
+        );
+    }
+
+    #[test]
+    fn accessed_desc_uses_only_successful_target_access_time() {
+        let entries = vec![
+            test_entry("modified", "modified", "/repos/modified"),
+            test_entry("accessed", "accessed", "/repos/accessed"),
+            test_entry("unknown", "unknown", "/repos/unknown"),
+        ];
+        let meta_cache = HashMap::from([
+            (
+                "/repos/modified".to_string(),
+                SortMeta {
+                    modified_epoch: Some(500),
+                    created_epoch: None,
+                    accessed_epoch: Some(100),
+                },
+            ),
+            (
+                "/repos/accessed".to_string(),
+                SortMeta {
+                    modified_epoch: Some(200),
+                    created_epoch: None,
+                    accessed_epoch: Some(400),
+                },
+            ),
+        ]);
+
+        assert_eq!(
+            filter_and_sort(
+                &entries,
+                "",
+                SortMode::AccessedDesc,
+                &meta_cache,
+                &HashMap::new(),
+                None
+            ),
+            vec![1, 0, 2]
+        );
+    }
+
+    #[test]
+    fn recents_uses_the_latest_modified_or_accessed_time() {
+        let entries = vec![
+            test_entry("modified", "modified", "/repos/modified"),
+            test_entry("accessed", "accessed", "/repos/accessed"),
+            test_entry("unknown", "unknown", "/repos/unknown"),
+        ];
+        let meta_cache = HashMap::from([
+            (
+                "/repos/modified".to_string(),
+                SortMeta {
+                    modified_epoch: Some(500),
+                    created_epoch: None,
+                    accessed_epoch: Some(100),
+                },
+            ),
+            (
+                "/repos/accessed".to_string(),
+                SortMeta {
+                    modified_epoch: Some(200),
+                    created_epoch: None,
+                    accessed_epoch: Some(600),
+                },
+            ),
+        ]);
+
+        assert_eq!(
+            filter_and_sort(
+                &entries,
+                "",
+                SortMode::Recents,
+                &meta_cache,
+                &HashMap::new(),
+                None
+            ),
+            vec![1, 0, 2]
+        );
+    }
+
+    #[test]
+    fn ignored_paths_sort_after_non_ignored_paths() {
+        let entries = vec![
+            test_entry("ignored-new", "ignored-new", "/repos/ignored-new"),
+            test_entry("normal-old", "normal-old", "/repos/normal-old"),
+            test_entry("ignored-old", "ignored-old", "/repos/ignored-old"),
+            test_entry("normal-new", "normal-new", "/repos/normal-new"),
+        ];
+        let meta_cache = HashMap::from([
+            (
+                "/repos/ignored-new".to_string(),
+                SortMeta {
+                    modified_epoch: Some(700),
+                    created_epoch: None,
+                    accessed_epoch: Some(800),
+                },
+            ),
+            (
+                "/repos/normal-old".to_string(),
+                SortMeta {
+                    modified_epoch: Some(100),
+                    created_epoch: None,
+                    accessed_epoch: Some(200),
+                },
+            ),
+            (
+                "/repos/ignored-old".to_string(),
+                SortMeta {
+                    modified_epoch: Some(300),
+                    created_epoch: None,
+                    accessed_epoch: Some(400),
+                },
+            ),
+            (
+                "/repos/normal-new".to_string(),
+                SortMeta {
+                    modified_epoch: Some(500),
+                    created_epoch: None,
+                    accessed_epoch: Some(600),
+                },
+            ),
+        ]);
+        let ignored_paths = std::collections::HashSet::from([
+            "/repos/ignored-new".to_string(),
+            "/repos/ignored-old".to_string(),
+        ]);
+
+        assert_eq!(
+            filter_and_sort(
+                &entries,
+                "",
+                SortMode::Recents,
+                &meta_cache,
+                &HashMap::new(),
+                Some(&ignored_paths)
+            ),
+            vec![3, 1, 0, 2]
         );
     }
 

@@ -49,6 +49,22 @@ navgator --config-entry 'sort.default="alpha-asc"' \
 
 Config behavior, discovery order, runtime defaults, written defaults, and schema rules are specified in `docs/config-behavior-spec.md`.
 
+## Sorting
+
+Use `accessed-desc` to prioritize targets that navgator successfully navigated to or ran an action on. Use `recents` to sort by the latest of that access time and the target's filesystem modification time:
+
+```toml
+[sort]
+default = "recents"
+
+[sort.ignore]
+recents = ["~/Downloads"]
+```
+
+Ignored paths remain visible but always sort below non-ignored paths in that mode. Ignore lists are mode-specific, so the example does not affect alphabetical or modified-time sorting.
+
+Access history is user state stored under `$XDG_STATE_HOME/navgator/usage.json`, or `~/.local/state/navgator/usage.json` when `XDG_STATE_HOME` is unset or empty. Navgator records only the resolved target, so running an action on a worktree bumps that worktree rather than its parent project.
+
 ## Zsh Widget
 
 Choose one setup path.

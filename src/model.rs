@@ -148,6 +148,18 @@ pub(crate) struct PreviewColors {
 pub(crate) struct SortMeta {
     pub(crate) modified_epoch: Option<i64>,
     pub(crate) created_epoch: Option<i64>,
+    pub(crate) accessed_epoch: Option<i64>,
+}
+
+impl SortMeta {
+    pub(crate) fn recent_epoch(self) -> Option<i64> {
+        match (self.modified_epoch, self.accessed_epoch) {
+            (Some(modified), Some(accessed)) => Some(modified.max(accessed)),
+            (Some(modified), None) => Some(modified),
+            (None, Some(accessed)) => Some(accessed),
+            (None, None) => None,
+        }
+    }
 }
 
 pub(crate) struct MetaResult {
@@ -511,18 +523,67 @@ impl ThemeColors {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct SortSettings {
     pub(crate) default_mode: SortMode,
     pub(crate) pin_current_project: bool,
+    configured_ignored_paths:
+        std::collections::BTreeMap<SortMode, std::collections::HashSet<String>>,
+    ignored_paths: std::collections::BTreeMap<SortMode, std::collections::HashSet<String>>,
 }
 
 impl Default for SortSettings {
     fn default() -> Self {
         Self {
-            default_mode: SortMode::ModifiedDesc,
+            default_mode: SortMode::Recents,
             pin_current_project: true,
+            configured_ignored_paths: std::collections::BTreeMap::new(),
+            ignored_paths: std::collections::BTreeMap::new(),
         }
+    }
+}
+
+impl SortSettings {
+    pub(crate) fn ignored_paths(
+        &self,
+        mode: SortMode,
+    ) -> Option<&std::collections::HashSet<String>> {
+        self.ignored_paths.get(&mode)
+    }
+
+    pub(crate) fn set_ignored_paths(
+        &mut self,
+        mode: SortMode,
+        paths: std::collections::HashSet<String>,
+    ) {
+        self.configured_ignored_paths.insert(mode, paths.clone());
+        self.ignored_paths.insert(mode, paths);
+    }
+
+    pub(crate) fn resolve_ignored_paths<'a>(
+        &mut self,
+        paths: impl Iterator<Item = &'a str>,
+    ) -> std::io::Result<()> {
+        let paths = paths
+            .map(|path| Ok((path.to_string(), crate::path_identity::path_key(path)?)))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        self.ignored_paths = self
+            .configured_ignored_paths
+            .iter()
+            .map(|(mode, configured_paths)| {
+                let ignored_keys = configured_paths
+                    .iter()
+                    .map(|path| crate::path_identity::path_key(path))
+                    .collect::<std::io::Result<std::collections::HashSet<_>>>()?;
+                let ignored_paths = paths
+                    .iter()
+                    .filter(|(_, key)| ignored_keys.contains(key))
+                    .map(|(path, _)| path.clone())
+                    .collect();
+                Ok((*mode, ignored_paths))
+            })
+            .collect::<std::io::Result<_>>()?;
+        Ok(())
     }
 }
 
@@ -562,7 +623,7 @@ impl Default for BranchSettings {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SortMode {
     Match,
     AlphaAsc,
@@ -571,6 +632,8 @@ pub(crate) enum SortMode {
     CreatedDesc,
     ModifiedAsc,
     ModifiedDesc,
+    AccessedDesc,
+    Recents,
 }
 
 impl SortMode {
@@ -582,7 +645,9 @@ impl SortMode {
             SortMode::CreatedAsc => SortMode::CreatedDesc,
             SortMode::CreatedDesc => SortMode::ModifiedAsc,
             SortMode::ModifiedAsc => SortMode::ModifiedDesc,
-            SortMode::ModifiedDesc => SortMode::Match,
+            SortMode::ModifiedDesc => SortMode::AccessedDesc,
+            SortMode::AccessedDesc => SortMode::Recents,
+            SortMode::Recents => SortMode::Match,
         }
     }
 
@@ -595,16 +660,19 @@ impl SortMode {
             SortMode::CreatedDesc => "Created v",
             SortMode::ModifiedAsc => "Modified ^",
             SortMode::ModifiedDesc => "Modified v",
+            SortMode::AccessedDesc => "Accessed v",
+            SortMode::Recents => "Recents",
         }
     }
 
-    pub(crate) fn uses_time(self) -> bool {
+    pub(crate) fn uses_filesystem_time(self) -> bool {
         matches!(
             self,
             SortMode::CreatedAsc
                 | SortMode::CreatedDesc
                 | SortMode::ModifiedAsc
                 | SortMode::ModifiedDesc
+                | SortMode::Recents
         )
     }
 }
@@ -662,6 +730,8 @@ pub(crate) struct VisibleListArgs<'a> {
     pub(crate) accent: Color,
     pub(crate) muted: Color,
     pub(crate) dates: &'a std::collections::HashMap<String, String>,
+    pub(crate) sort_meta: &'a std::collections::HashMap<String, SortMeta>,
+    pub(crate) sort_mode: SortMode,
     pub(crate) tags: &'a std::collections::HashMap<String, Vec<String>>,
     pub(crate) inner_width: usize,
     pub(crate) tokens: &'a crate::search::QueryTokens,

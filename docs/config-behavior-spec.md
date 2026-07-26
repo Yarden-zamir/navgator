@@ -60,14 +60,24 @@
 - Remote settings are replaced field by field by later config files.
 - Preview settings are replaced field by field by later config files.
 - Invalid TOML or invalid typed values fail config loading with a user-visible error.
-- Unknown config keys are ignored by deserialization unless the schema validator is used externally, except unknown contexts inside `[keybindings]`, which fail loading.
+- Unknown config keys are ignored by deserialization unless the schema validator is used externally, except unknown contexts inside `[keybindings]` and unknown mode names inside `[sort.ignore]`, which fail loading.
 
 ## Runtime Defaults
 
 - Runtime defaults are applied before reading config files.
 - Missing config sections keep their runtime defaults.
 - Missing fields inside present sections keep their runtime defaults.
-- Default sort mode is `modified-desc`.
+- Default sort mode is `recents`.
+- `accessed-desc` sorts known successful target access times newest first and places targets without access history last.
+- `recents` sorts newest first by the latest known filesystem modification or successful target access time.
+- Equal sort timestamps fall back to case-insensitive display-name order.
+- `[sort.ignore]` maps sort mode names to path lists.
+- Ignored paths remain visible and sort below every non-ignored path only in the configured mode.
+- Normal ordering is preserved within ignored and non-ignored groups.
+- An ignored current project is not promoted by current-project pinning in that mode.
+- Later config layers replace ignore paths only for the modes they specify; an empty list clears that mode.
+- Sort ignore paths support `~/`, `$HOME`, absolute paths, and paths relative to their config source.
+- Sort ignore paths do not need to exist when config is loaded.
 - Pinning the current project defaults to true.
 - Remote branches default to disabled on startup.
 - Remote refresh on toggle defaults to true.
@@ -117,6 +127,28 @@
 - Existing files and directories are accepted as static items.
 - `index_folders` includes each configured folder and its direct child directories.
 - Path deduplication uses the normalized absolute path string.
+
+## Access History
+
+- Access history records the resolved target path, not the navigator row that originated an action.
+- Returning a navigation target successfully records that target as accessed.
+- Completing a configured command or URL action successfully records its target as accessed.
+- Direct action bindings and action-picker actions share the same access behavior.
+- Remote branch actions record the prepared local worktree target.
+- Create success records the created success target when navgator returns navigation to it.
+- Failed and cancelled target actions do not update access history.
+- Opening an action or create picker does not update access history.
+- Copying a path, editing tags, deleting a worktree, previewing, filtering, and other in-place UI controls do not update access history.
+- Access history stores normalized absolute target paths and whole Unix seconds.
+- Access history is stored in `$XDG_STATE_HOME/navgator/usage.json` when `XDG_STATE_HOME` is set and non-empty.
+- Access history is stored in `~/.local/state/navgator/usage.json` otherwise.
+- Access state uses a versioned JSON object and preserves the greatest recorded timestamp for each path.
+- Access-state writes use a process-safe file lock and atomic replacement.
+- Malformed or unsupported access state fails interactive startup without replacing the state file.
+- A write failure after a successful target action emits a warning but does not fail that completed action.
+- `accessed-desc` displays access time in the result date column.
+- `recents` displays the modification or access time that controls each row's position.
+- Access history is user state, not provider cache or project-local metadata.
 
 ## Actions
 

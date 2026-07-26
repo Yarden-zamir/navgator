@@ -1,4 +1,4 @@
-use crate::metadata::format_date_display;
+use crate::metadata::{format_date_display, format_epoch_minutes};
 use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, KeyChord, Keymap};
 use crate::model::{
     Focus, HelpColors, HelpContext, PreviewSettings, RemoteToggleState, SidePanelRender, UiLayout,
@@ -575,12 +575,25 @@ pub(crate) fn build_visible_list_items(
         let entry = &args.entries[*item_index];
         let metadata_path = &entry.metadata_path;
         let display = &entry.display;
-        let date_value = args
-            .dates
-            .get(metadata_path)
-            .map(String::as_str)
-            .unwrap_or(DATE_PLACEHOLDER);
-        let date_display = format_date_display(date_value);
+        let recency_epoch =
+            args.sort_meta
+                .get(metadata_path)
+                .and_then(|meta| match args.sort_mode {
+                    crate::model::SortMode::AccessedDesc => meta.accessed_epoch,
+                    crate::model::SortMode::Recents => meta.recent_epoch(),
+                    _ => None,
+                });
+        let date_value = match args.sort_mode {
+            crate::model::SortMode::AccessedDesc | crate::model::SortMode::Recents => recency_epoch
+                .map(format_epoch_minutes)
+                .unwrap_or_else(|| DATE_PLACEHOLDER.to_string()),
+            _ => args
+                .dates
+                .get(metadata_path)
+                .cloned()
+                .unwrap_or_else(|| DATE_PLACEHOLDER.to_string()),
+        };
+        let date_display = format_date_display(&date_value);
         let date_len = date_display.chars().count();
         let tag_list = args
             .tags

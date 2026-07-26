@@ -75,7 +75,7 @@ struct ConfigFile {
     ui: Option<ConfigUi>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ConfigRuntimeDefaults {
     preview_settings: PreviewSettings,
     sort_settings: SortSettings,
@@ -241,7 +241,7 @@ struct ConfigSort {
     #[serde(default)]
     #[schemars(
         title = "Default Sort",
-        description = "Initial result sort mode. Defaults to modified-desc."
+        description = "Initial result sort mode. accessed-desc uses successful target actions; recents uses the latest modified or accessed time. Defaults to recents."
     )]
     default: Option<ConfigSortMode>,
     #[serde(default)]
@@ -250,9 +250,54 @@ struct ConfigSort {
         description = "When true, the current Git worktree/project is pinned to the first row for empty searches. Defaults to true."
     )]
     pin_current_project: Option<bool>,
+    #[serde(default)]
+    #[schemars(
+        title = "Ignored Sort Paths",
+        description = "Paths to keep below non-ignored results for each sort mode. Later config layers replace paths only for the modes they specify."
+    )]
+    ignore: Option<ConfigSortIgnore>,
 }
 
-#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+#[schemars(
+    title = "Ignored Sort Paths",
+    description = "Paths to keep below non-ignored results for each sort mode."
+)]
+struct ConfigSortIgnore {
+    #[serde(rename = "match")]
+    match_mode: Option<Vec<String>>,
+    alpha_asc: Option<Vec<String>>,
+    alpha_desc: Option<Vec<String>>,
+    created_asc: Option<Vec<String>>,
+    created_desc: Option<Vec<String>>,
+    modified_asc: Option<Vec<String>>,
+    modified_desc: Option<Vec<String>>,
+    accessed_desc: Option<Vec<String>>,
+    recents: Option<Vec<String>>,
+}
+
+impl ConfigSortIgnore {
+    fn into_mode_paths(self) -> Vec<(ConfigSortMode, Vec<String>)> {
+        let candidates = [
+            (ConfigSortMode::Match, self.match_mode),
+            (ConfigSortMode::AlphaAsc, self.alpha_asc),
+            (ConfigSortMode::AlphaDesc, self.alpha_desc),
+            (ConfigSortMode::CreatedAsc, self.created_asc),
+            (ConfigSortMode::CreatedDesc, self.created_desc),
+            (ConfigSortMode::ModifiedAsc, self.modified_asc),
+            (ConfigSortMode::ModifiedDesc, self.modified_desc),
+            (ConfigSortMode::AccessedDesc, self.accessed_desc),
+            (ConfigSortMode::Recents, self.recents),
+        ];
+        candidates
+            .into_iter()
+            .filter_map(|(mode, paths)| paths.map(|paths| (mode, paths)))
+            .collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 enum ConfigSortMode {
     Match,
@@ -262,6 +307,8 @@ enum ConfigSortMode {
     CreatedDesc,
     ModifiedAsc,
     ModifiedDesc,
+    AccessedDesc,
+    Recents,
 }
 
 impl ConfigSortMode {
@@ -274,6 +321,8 @@ impl ConfigSortMode {
             ConfigSortMode::CreatedDesc => SortMode::CreatedDesc,
             ConfigSortMode::ModifiedAsc => SortMode::ModifiedAsc,
             ConfigSortMode::ModifiedDesc => SortMode::ModifiedDesc,
+            ConfigSortMode::AccessedDesc => SortMode::AccessedDesc,
+            ConfigSortMode::Recents => SortMode::Recents,
         }
     }
 }
@@ -764,6 +813,14 @@ impl ConfigLoadState {
             if let Some(value) = sort.pin_current_project {
                 self.sort_settings.pin_current_project = value;
             }
+            if let Some(ignore) = sort.ignore {
+                for (mode, paths) in ignore.into_mode_paths() {
+                    self.sort_settings.set_ignored_paths(
+                        mode.to_sort_mode(),
+                        normalize_sort_ignore_paths(&paths, base_dir, home),
+                    );
+                }
+            }
         }
         if let Some(remote) = config.remote {
             if let Some(value) = remote.enabled_by_default {
@@ -1138,7 +1195,7 @@ index_folders = ["~/Github", "~/Projects"]
 static_items = []
 
 [sort]
-default = "modified-desc"
+default = "recents"
 pin_current_project = true
 
 [remote]
@@ -1366,6 +1423,11 @@ fn merge_paths(
 }
 
 fn normalize_path(raw: &str, base_dir: &Path, home: &Path) -> Option<PathBuf> {
+    let path = normalize_configured_path(raw, base_dir, home)?;
+    path.exists().then_some(path)
+}
+
+fn normalize_configured_path(raw: &str, base_dir: &Path, home: &Path) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -1381,11 +1443,19 @@ fn normalize_path(raw: &str, base_dir: &Path, home: &Path) -> Option<PathBuf> {
     if path.is_relative() {
         path = base_dir.join(path);
     }
-    if path.exists() {
-        Some(path)
-    } else {
-        None
-    }
+    Some(path)
+}
+
+fn normalize_sort_ignore_paths(
+    raw_paths: &[String],
+    base_dir: &Path,
+    home: &Path,
+) -> HashSet<String> {
+    raw_paths
+        .iter()
+        .filter_map(|raw| normalize_configured_path(raw, base_dir, home))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn display_path_for_user(path: &str) -> String {
@@ -1422,16 +1492,16 @@ mod tests {
         default_config_contents, ensure_schema_link_in_config_file, load_config,
         validate_picker_action_ids, ConfigAction, ConfigActionKind, ConfigActions, ConfigCreate,
         ConfigCreateItem, ConfigCreatePrompt, ConfigCreatePromptKind, ConfigFile,
-        ConfigLayerSource, ConfigLoadState, CONFIG_SCHEMA_URL,
+        ConfigLayerSource, ConfigLoadState, ConfigSortMode, CONFIG_SCHEMA_URL,
     };
     use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, KeyChord};
     use crate::model::{
         ActionBindingKey, ActionKind, ActionSettings, BranchSelectBehavior, CreatePromptKind,
-        SortMode,
+        SortMode, SortSettings,
     };
     use figment::providers::{Format, Toml};
     use figment::Figment;
-    use std::{env, fs, path::PathBuf, sync::Mutex};
+    use std::{collections::HashSet, env, fs, path::PathBuf, sync::Mutex};
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1715,6 +1785,132 @@ on_select = "checkout"
             state.sort_settings.default_mode,
             SortMode::AlphaDesc
         ));
+    }
+
+    #[test]
+    fn recency_sort_modes_parse_from_config() {
+        assert!(matches!(
+            SortSettings::default().default_mode,
+            SortMode::Recents
+        ));
+        let accessed = toml_config(
+            r#"
+            [sort]
+            default = "accessed-desc"
+            "#,
+        );
+        let recent = toml_config(
+            r#"
+            [sort]
+            default = "recents"
+            "#,
+        );
+
+        assert!(matches!(
+            accessed.sort.and_then(|sort| sort.default),
+            Some(ConfigSortMode::AccessedDesc)
+        ));
+        assert!(matches!(
+            recent.sort.and_then(|sort| sort.default),
+            Some(ConfigSortMode::Recents)
+        ));
+    }
+
+    #[test]
+    fn later_sort_ignore_replaces_only_the_configured_mode() {
+        let home = PathBuf::from("/Users/example");
+        let base = PathBuf::from("/config");
+        let mut state = ConfigLoadState::new();
+        let first = toml_config(
+            r#"
+            [sort.ignore]
+            recents = ["first"]
+            accessed-desc = ["accessed"]
+            "#,
+        );
+        let second = toml_config(
+            r#"
+            [sort.ignore]
+            recents = ["ignored/../second"]
+            "#,
+        );
+        let third = toml_config(
+            r#"
+            [sort.ignore]
+            accessed-desc = []
+            "#,
+        );
+
+        state
+            .apply_config_file(first, &base, &home, ConfigLayerSource::File)
+            .expect("apply first config");
+        state
+            .apply_config_file(second, &base, &home, ConfigLayerSource::File)
+            .expect("apply second config");
+        state
+            .apply_config_file(third, &base, &home, ConfigLayerSource::File)
+            .expect("apply third config");
+        state
+            .sort_settings
+            .resolve_ignored_paths(["/config/alias/../second", "/config/normal"].into_iter())
+            .expect("resolve ignored paths");
+
+        assert_eq!(
+            state.sort_settings.ignored_paths(SortMode::Recents),
+            Some(&HashSet::from(["/config/alias/../second".to_string()]))
+        );
+        assert_eq!(
+            state.sort_settings.ignored_paths(SortMode::AccessedDesc),
+            Some(&HashSet::new())
+        );
+    }
+
+    #[test]
+    fn unknown_sort_ignore_modes_fail_deserialization() {
+        let result = Figment::from(Toml::string(
+            r#"
+            [sort.ignore]
+            recnts = ["ignored"]
+            "#,
+        ))
+        .extract::<ConfigFile>();
+
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sort_ignore_re_resolves_configured_paths_for_new_entries() {
+        let home = PathBuf::from("/Users/example");
+        let base = env::temp_dir().join(format!("navgator-sort-ignore-{}", std::process::id()));
+        let real_target = base.join("real").join("future");
+        fs::create_dir_all(&real_target).expect("real target");
+        let mut state = ConfigLoadState::new();
+        state
+            .apply_config_file(
+                toml_config(
+                    r#"
+                    [sort.ignore]
+                    recents = ["alias/future"]
+                    "#,
+                ),
+                &base,
+                &home,
+                ConfigLayerSource::File,
+            )
+            .expect("apply ignore config");
+        std::os::unix::fs::symlink(base.join("real"), base.join("alias")).expect("alias symlink");
+
+        state
+            .sort_settings
+            .resolve_ignored_paths([real_target.to_string_lossy().as_ref()].into_iter())
+            .expect("resolve ignored paths");
+
+        assert_eq!(
+            state.sort_settings.ignored_paths(SortMode::Recents),
+            Some(&HashSet::from([real_target.to_string_lossy().into_owned()]))
+        );
+        fs::remove_dir_all(base).expect("remove test directory");
     }
 
     #[test]

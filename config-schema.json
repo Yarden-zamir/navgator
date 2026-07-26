@@ -678,10 +678,22 @@
       "properties": {
         "default": {
           "title": "Default Sort",
-          "description": "Initial result sort mode. Defaults to modified-desc.",
+          "description": "Initial result sort mode. accessed-desc uses successful target actions; recents uses the latest modified or accessed time. Defaults to recents.",
           "anyOf": [
             {
               "$ref": "#/definitions/ConfigSortMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ignore": {
+          "title": "Ignored Sort Paths",
+          "description": "Paths to keep below non-ignored results for each sort mode. Later config layers replace paths only for the modes they specify.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigSortIgnore"
             },
             {
               "type": "null"
@@ -699,6 +711,104 @@
         }
       }
     },
+    "ConfigSortIgnore": {
+      "title": "Ignored Sort Paths",
+      "description": "Paths to keep below non-ignored results for each sort mode.",
+      "type": "object",
+      "properties": {
+        "accessed-desc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "alpha-asc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "alpha-desc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "created-asc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "created-desc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "match": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "modified-asc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "modified-desc": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "recents": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "ConfigSortMode": {
       "type": "string",
       "enum": [
@@ -708,7 +818,9 @@
         "created-asc",
         "created-desc",
         "modified-asc",
-        "modified-desc"
+        "modified-desc",
+        "accessed-desc",
+        "recents"
       ]
     },
     "ConfigTheme": {

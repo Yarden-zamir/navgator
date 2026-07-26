@@ -91,7 +91,7 @@ fn system_time_epoch(value: SystemTime) -> Option<i64> {
         .filter(|value| *value > 0)
 }
 
-fn format_epoch_minutes(epoch: i64) -> String {
+pub(crate) fn format_epoch_minutes(epoch: i64) -> String {
     let timestamp = epoch as libc::time_t;
     let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
     let local_time = unsafe { libc::localtime_r(&timestamp, tm.as_mut_ptr()) };

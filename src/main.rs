@@ -26,11 +26,13 @@ mod git;
 mod github;
 mod metadata;
 mod model;
+mod path_identity;
 mod provider_runtime;
 mod results;
 mod search;
 mod tags;
 mod ui;
+mod usage;
 
 use compositor::{CurrentCompositor, FocusChange, NavigationCompositor};
 use config::config_schema_json;
@@ -64,6 +66,7 @@ use ui::{
     compose_preview_text_with_input, compute_ui_layout, keymap_binding_label, preview_content_area,
     rect_contains, render_side_panels, text_line_count,
 };
+use usage::{record_access, AccessHistory};
 
 fn main() -> AppResult<()> {
     let raw_args: Vec<String> = env::args().skip(1).collect();
@@ -250,12 +253,20 @@ fn run_navigate(initial_launch: InitialLaunch, config_entries: &[String]) -> App
         Some(NavigateOutcome::Navigate {
             path,
             close_session,
-        }) => write_navigation_outcome(&path, close_session),
+        }) => {
+            write_navigation_outcome(&path, close_session)?;
+            report_access_result(&path);
+            Ok(())
+        }
         Some(NavigateOutcome::RunAction {
             action,
+            target_path,
             close_session,
         }) => {
             run_action(action)?;
+            if let Some(path) = target_path {
+                report_access_result(&path);
+            }
             if close_session {
                 write_close_session_outcome(None)?;
             }
@@ -274,6 +285,7 @@ enum NavigateOutcome {
     },
     RunAction {
         action: ResolvedAction,
+        target_path: Option<String>,
         close_session: bool,
     },
 }
@@ -301,6 +313,13 @@ struct SelectListArgs {
     theme_colors: ThemeColors,
     keymap: Keymap,
     initial_launch: InitialLaunch,
+}
+
+#[derive(Clone, Copy)]
+struct ResultSortContext<'a> {
+    show_remote_branches: bool,
+    sort_settings: &'a SortSettings,
+    current_project_path: Option<&'a str>,
 }
 
 enum ResolvedAction {
@@ -406,6 +425,12 @@ fn write_navigation_outcome(path: &str, close_session: bool) -> AppResult<()> {
     }
 }
 
+fn report_access_result(path: &str) {
+    if let Err(error) = record_access(path) {
+        eprintln!("Warning: failed to record access for {path}: {error}");
+    }
+}
+
 fn write_close_session_outcome(path: Option<&str>) -> AppResult<()> {
     if env::var("NAVGATOR_OUTPUT_PROTOCOL").ok().as_deref() != Some("2") {
         if let Some(path) = path {
@@ -471,6 +496,7 @@ fn resolve_picker_action(
                     args,
                     current_dir,
                 },
+                target_path: path.map(str::to_string),
                 close_session,
             })
         }
@@ -479,6 +505,7 @@ fn resolve_picker_action(
             let url = expand_action_value(url, path, github_url.as_deref())?;
             Some(NavigateOutcome::RunAction {
                 action: ResolvedAction::OpenUrl(url),
+                target_path: path.map(str::to_string),
                 close_session,
             })
         }
@@ -1084,7 +1111,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
     let SelectListArgs {
         mut entries,
         preview_settings,
-        sort_settings,
+        mut sort_settings,
         remote_settings,
         branch_settings,
         action_settings,
@@ -1112,6 +1139,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
         return Ok(None);
     }
 
+    let access_history = AccessHistory::load()?;
     let (mut terminal, _guard) = setup_terminal()?;
     let mut input = Input::default();
     let mut selected = 0usize;
@@ -1119,6 +1147,9 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
     let mut sort_mode = sort_settings.default_mode;
     let mut focus = Focus::Search;
     let mut meta_cache: HashMap<String, SortMeta> = HashMap::new();
+    access_history.apply_to_sort_meta(&entries, &mut meta_cache)?;
+    sort_settings
+        .resolve_ignored_paths(entries.iter().map(|entry| entry.metadata_path.as_str()))?;
     let mut list_offset = 0usize;
     let accent = theme_colors.accent;
     let warm = theme_colors.warm;
@@ -1155,11 +1186,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
         sort_mode,
         &meta_cache,
         &tag_cache,
-        show_remote_branches,
-        pinned_path(
-            sort_settings.pin_current_project,
-            current_project_path.as_deref(),
-        ),
+        ResultSortContext {
+            show_remote_branches,
+            sort_settings: &sort_settings,
+            current_project_path: current_project_path.as_deref(),
+        },
     );
     let mut preview_path: Option<String> = None;
     let mut preview_entry_id: Option<String> = None;
@@ -1210,7 +1241,7 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
             spawn_remote_branch_result_provider(entry, result_tx.clone(), remote_settings);
         }
     }
-    if sort_mode.uses_time() {
+    if sort_mode.uses_filesystem_time() {
         let paths = all_metadata_paths(&entries);
         spawn_bulk_metadata_fetch(&paths, &date_cache, &mut date_in_flight, &date_tx);
     }
@@ -1266,11 +1297,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                         sort_mode,
                         &meta_cache,
                         &tag_cache,
-                        show_remote_branches,
-                        pinned_path(
-                            sort_settings.pin_current_project,
-                            current_project_path.as_deref(),
-                        ),
+                        ResultSortContext {
+                            show_remote_branches,
+                            sort_settings: &sort_settings,
+                            current_project_path: current_project_path.as_deref(),
+                        },
                     );
                     selected = adjust_selected_index(selected, filtered.len());
                     preview_cache.remove(&path);
@@ -1341,6 +1372,13 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
         }
 
         if entries_changed {
+            access_history.apply_to_sort_meta(&entries, &mut meta_cache)?;
+            sort_settings
+                .resolve_ignored_paths(entries.iter().map(|entry| entry.metadata_path.as_str()))?;
+            if sort_mode.uses_filesystem_time() {
+                let paths = all_metadata_paths(&entries);
+                spawn_bulk_metadata_fetch(&paths, &date_cache, &mut date_in_flight, &date_tx);
+            }
             let selected_id = current_entry.as_ref().map(|entry| entry.id.clone());
             filtered = filter_and_sort_visible(
                 &entries,
@@ -1348,11 +1386,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                 sort_mode,
                 &meta_cache,
                 &tag_cache,
-                show_remote_branches,
-                pinned_path(
-                    sort_settings.pin_current_project,
-                    current_project_path.as_deref(),
-                ),
+                ResultSortContext {
+                    show_remote_branches,
+                    sort_settings: &sort_settings,
+                    current_project_path: current_project_path.as_deref(),
+                },
             );
             selected = selected_after_refilter(
                 &entries,
@@ -1439,15 +1477,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                 .display
                 .unwrap_or_else(|| DATE_PLACEHOLDER.to_string());
             date_cache.insert(result.path.clone(), display);
-            meta_cache.insert(
-                result.path.clone(),
-                SortMeta {
-                    modified_epoch: result.modified_epoch,
-                    created_epoch: result.created_epoch,
-                },
-            );
+            let sort_meta = meta_cache.entry(result.path.clone()).or_default();
+            sort_meta.modified_epoch = result.modified_epoch;
+            sort_meta.created_epoch = result.created_epoch;
             date_in_flight.remove(&result.path);
-            if sort_mode.uses_time() {
+            if sort_mode.uses_filesystem_time() {
                 resort_needed = true;
             }
         }
@@ -1475,11 +1509,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                 sort_mode,
                 &meta_cache,
                 &tag_cache,
-                show_remote_branches,
-                pinned_path(
-                    sort_settings.pin_current_project,
-                    current_project_path.as_deref(),
-                ),
+                ResultSortContext {
+                    show_remote_branches,
+                    sort_settings: &sort_settings,
+                    current_project_path: current_project_path.as_deref(),
+                },
             );
             selected = selected_after_refilter(
                 &entries,
@@ -1499,11 +1533,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                 sort_mode,
                 &meta_cache,
                 &tag_cache,
-                show_remote_branches,
-                pinned_path(
-                    sort_settings.pin_current_project,
-                    current_project_path.as_deref(),
-                ),
+                ResultSortContext {
+                    show_remote_branches,
+                    sort_settings: &sort_settings,
+                    current_project_path: current_project_path.as_deref(),
+                },
             );
             selected = selected_after_refilter(
                 &entries,
@@ -1689,6 +1723,8 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                 accent,
                 muted,
                 dates: &date_cache,
+                sort_meta: &meta_cache,
+                sort_mode,
                 tags: &tag_cache,
                 inner_width: list_inner_width,
                 tokens: &tokens,
@@ -2425,11 +2461,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                             sort_mode,
                             &meta_cache,
                             &tag_cache,
-                            show_remote_branches,
-                            pinned_path(
-                                sort_settings.pin_current_project,
-                                current_project_path.as_deref(),
-                            ),
+                            ResultSortContext {
+                                show_remote_branches,
+                                sort_settings: &sort_settings,
+                                current_project_path: current_project_path.as_deref(),
+                            },
                         );
                         selected = selected_id
                             .as_deref()
@@ -2506,16 +2542,16 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                             sort_mode,
                             &meta_cache,
                             &tag_cache,
-                            show_remote_branches,
-                            pinned_path(
-                                sort_settings.pin_current_project,
-                                current_project_path.as_deref(),
-                            ),
+                            ResultSortContext {
+                                show_remote_branches,
+                                sort_settings: &sort_settings,
+                                current_project_path: current_project_path.as_deref(),
+                            },
                         );
                         selected = 0;
                         stick_to_first_result = true;
                         list_offset = 0;
-                        if sort_mode.uses_time() {
+                        if sort_mode.uses_filesystem_time() {
                             let paths = all_metadata_paths(&entries);
                             spawn_bulk_metadata_fetch(
                                 &paths,
@@ -2578,11 +2614,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                     sort_mode,
                                     &meta_cache,
                                     &tag_cache,
-                                    show_remote_branches,
-                                    pinned_path(
-                                        sort_settings.pin_current_project,
-                                        current_project_path.as_deref(),
-                                    ),
+                                    ResultSortContext {
+                                        show_remote_branches,
+                                        sort_settings: &sort_settings,
+                                        current_project_path: current_project_path.as_deref(),
+                                    },
                                 );
                                 selected = 0;
                                 stick_to_first_result = true;
@@ -2613,11 +2649,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                     sort_mode,
                                     &meta_cache,
                                     &tag_cache,
-                                    show_remote_branches,
-                                    pinned_path(
-                                        sort_settings.pin_current_project,
-                                        current_project_path.as_deref(),
-                                    ),
+                                    ResultSortContext {
+                                        show_remote_branches,
+                                        sort_settings: &sort_settings,
+                                        current_project_path: current_project_path.as_deref(),
+                                    },
                                 );
                                 selected = match selected_id {
                                     Some(value) => {
@@ -2706,11 +2742,11 @@ fn select_from_list(args: SelectListArgs) -> AppResult<Option<NavigateOutcome>> 
                                 sort_mode,
                                 &meta_cache,
                                 &tag_cache,
-                                show_remote_branches,
-                                pinned_path(
-                                    sort_settings.pin_current_project,
-                                    current_project_path.as_deref(),
-                                ),
+                                ResultSortContext {
+                                    show_remote_branches,
+                                    sort_settings: &sort_settings,
+                                    current_project_path: current_project_path.as_deref(),
+                                },
                             );
                             selected = 0;
                             stick_to_first_result = true;
@@ -2826,15 +2862,25 @@ fn filter_and_sort_visible(
     sort_mode: SortMode,
     meta_cache: &HashMap<String, SortMeta>,
     tag_cache: &HashMap<String, Vec<String>>,
-    show_remote_branches: bool,
-    pinned_path: Option<&str>,
+    context: ResultSortContext<'_>,
 ) -> Vec<usize> {
-    let mut indices: Vec<usize> = filter_and_sort(entries, query, sort_mode, meta_cache, tag_cache)
-        .into_iter()
-        .filter(|index| show_remote_branches || !is_remote_branch_entry(&entries[*index]))
-        .collect();
+    let ignored_paths = context.sort_settings.ignored_paths(sort_mode);
+    let mut indices: Vec<usize> = filter_and_sort(
+        entries,
+        query,
+        sort_mode,
+        meta_cache,
+        tag_cache,
+        ignored_paths,
+    )
+    .into_iter()
+    .filter(|index| context.show_remote_branches || !is_remote_branch_entry(&entries[*index]))
+    .collect();
     if query.trim().is_empty() {
-        pin_current_project(&mut indices, entries, pinned_path);
+        let pinned_path = context
+            .current_project_path
+            .filter(|_| context.sort_settings.pin_current_project);
+        pin_current_project(&mut indices, entries, pinned_path, ignored_paths);
     }
     indices
 }
@@ -2843,26 +2889,22 @@ fn pin_current_project(
     indices: &mut Vec<usize>,
     entries: &[NavigateEntry],
     pinned_path: Option<&str>,
+    ignored_paths: Option<&HashSet<String>>,
 ) {
     let Some(pinned_path) = pinned_path else {
         return;
     };
-    let Some(position) = indices
-        .iter()
-        .position(|index| entry_matches_path(&entries[*index], pinned_path))
-    else {
+    let Some(position) = indices.iter().position(|index| {
+        let entry = &entries[*index];
+        let ignored = ignored_paths
+            .map(|paths| paths.contains(&entry.metadata_path))
+            .unwrap_or(false);
+        !ignored && entry_matches_path(entry, pinned_path)
+    }) else {
         return;
     };
     let index = indices.remove(position);
     indices.insert(0, index);
-}
-
-fn pinned_path(pin_current_project: bool, current_project_path: Option<&str>) -> Option<&str> {
-    if pin_current_project {
-        current_project_path
-    } else {
-        None
-    }
 }
 
 fn entry_matches_path(entry: &NavigateEntry, path: &str) -> bool {
@@ -3931,10 +3973,12 @@ mod tests {
                     args,
                     current_dir: Some(current_dir),
                 },
+                target_path: Some(target_path),
                 close_session: false,
             })) if command == "editor"
                 && args == vec!["/repos/project"]
                 && current_dir.as_path() == Path::new("/repos/project")
+                && target_path == "/repos/project"
         ));
 
         let open_url = ActionDefinition {
@@ -3954,8 +3998,9 @@ mod tests {
             ),
             Ok(TargetActionDispatch::Exit(NavigateOutcome::RunAction {
                 action: ResolvedAction::OpenUrl(url),
+                target_path: Some(target_path),
                 close_session: false,
-            })) if url == "https://example.com"
+            })) if url == "https://example.com" && target_path == "/repos/project"
         ));
 
         let unavailable = ActionDefinition {
@@ -4553,6 +4598,7 @@ mod tests {
             SortMode::Match,
             &HashMap::new(),
             &HashMap::new(),
+            None,
         );
 
         assert_eq!(filtered, vec![1]);
@@ -4562,6 +4608,25 @@ mod tests {
             search::entry_match_context(&entries[0], &[], &tokens).as_deref(),
             None
         );
+    }
+
+    #[test]
+    fn ignored_current_project_is_not_pinned_above_other_results() {
+        let entries = vec![
+            test_entry("normal", "normal", "/repos/normal"),
+            test_entry("ignored", "ignored", "/repos/ignored"),
+        ];
+        let ignored_paths = HashSet::from(["/repos/ignored".to_string()]);
+        let mut indices = vec![0, 1];
+
+        pin_current_project(
+            &mut indices,
+            &entries,
+            Some("/repos/ignored"),
+            Some(&ignored_paths),
+        );
+
+        assert_eq!(indices, vec![0, 1]);
     }
 
     #[test]
