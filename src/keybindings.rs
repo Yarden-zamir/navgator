@@ -1,7 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::fmt;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum BindingContext {
@@ -34,40 +31,48 @@ impl BindingContext {
     ];
 
     pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Global => "global",
-            Self::Navigator => "navigator",
-            Self::Preview => "preview",
-            Self::Detail => "detail",
-            Self::TagEditor => "tag-editor",
-            Self::ActionPicker => "action-picker",
-            Self::CreatePicker => "create-picker",
-            Self::CreateForm => "create-form",
-            Self::CreateCompletions => "create-completions",
-            Self::ProgressOverlay => "progress-overlay",
-            Self::ErrorOverlay => "error-overlay",
-        }
+        binding_context_as_str(self)
     }
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "global" => Some(Self::Global),
-            "navigator" => Some(Self::Navigator),
-            "preview" => Some(Self::Preview),
-            "detail" => Some(Self::Detail),
-            "tag-editor" => Some(Self::TagEditor),
-            "action-picker" => Some(Self::ActionPicker),
-            "create-picker" => Some(Self::CreatePicker),
-            "create-form" => Some(Self::CreateForm),
-            "create-completions" => Some(Self::CreateCompletions),
-            "progress-overlay" => Some(Self::ProgressOverlay),
-            "error-overlay" => Some(Self::ErrorOverlay),
-            _ => None,
-        }
+        parse_binding_context(value)
     }
 
     pub(crate) const fn ordered() -> &'static [Self] {
         &Self::ORDERED
+    }
+}
+
+const fn binding_context_as_str(context: BindingContext) -> &'static str {
+    match context {
+        BindingContext::Global => "global",
+        BindingContext::Navigator => "navigator",
+        BindingContext::Preview => "preview",
+        BindingContext::Detail => "detail",
+        BindingContext::TagEditor => "tag-editor",
+        BindingContext::ActionPicker => "action-picker",
+        BindingContext::CreatePicker => "create-picker",
+        BindingContext::CreateForm => "create-form",
+        BindingContext::CreateCompletions => "create-completions",
+        BindingContext::ProgressOverlay => "progress-overlay",
+        BindingContext::ErrorOverlay => "error-overlay",
+    }
+}
+
+fn parse_binding_context(value: &str) -> Option<BindingContext> {
+    match value {
+        "global" => Some(BindingContext::Global),
+        "navigator" => Some(BindingContext::Navigator),
+        "preview" => Some(BindingContext::Preview),
+        "detail" => Some(BindingContext::Detail),
+        "tag-editor" => Some(BindingContext::TagEditor),
+        "action-picker" => Some(BindingContext::ActionPicker),
+        "create-picker" => Some(BindingContext::CreatePicker),
+        "create-form" => Some(BindingContext::CreateForm),
+        "create-completions" => Some(BindingContext::CreateCompletions),
+        "progress-overlay" => Some(BindingContext::ProgressOverlay),
+        "error-overlay" => Some(BindingContext::ErrorOverlay),
+        _ => None,
     }
 }
 
@@ -102,432 +107,108 @@ pub(crate) enum CoreAction {
 
 impl CoreAction {
     pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Navigate => "navigate",
-            Self::Actions => "actions",
-            Self::Create => "create",
-            Self::Run => "run",
-            Self::RunAndClose => "run-and-close",
-            Self::Cancel => "cancel",
-            Self::Back => "back",
-            Self::Confirm => "confirm",
-            Self::Accept => "accept",
-            Self::MoveUp => "move-up",
-            Self::MoveDown => "move-down",
-            Self::MoveLeft => "move-left",
-            Self::MoveRight => "move-right",
-            Self::PageUp => "page-up",
-            Self::PageDown => "page-down",
-            Self::MoveHome => "move-home",
-            Self::MoveEnd => "move-end",
-            Self::CopyPath => "copy-path",
-            Self::DeleteWorktree => "delete-worktree",
-            Self::ToggleRemotes => "toggle-remotes",
-            Self::EditTags => "edit-tags",
-            Self::CycleSort => "cycle-sort",
-            Self::ClearInput => "clear-input",
-            Self::RemoveLastTag => "remove-last-tag",
-            Self::DismissOverlay => "dismiss-overlay",
-        }
+        core_action_as_str(self)
     }
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "navigate" => Some(Self::Navigate),
-            "actions" => Some(Self::Actions),
-            "create" => Some(Self::Create),
-            "run" => Some(Self::Run),
-            "run-and-close" => Some(Self::RunAndClose),
-            "cancel" => Some(Self::Cancel),
-            "back" => Some(Self::Back),
-            "confirm" => Some(Self::Confirm),
-            "accept" => Some(Self::Accept),
-            "move-up" => Some(Self::MoveUp),
-            "move-down" => Some(Self::MoveDown),
-            "move-left" => Some(Self::MoveLeft),
-            "move-right" => Some(Self::MoveRight),
-            "page-up" => Some(Self::PageUp),
-            "page-down" => Some(Self::PageDown),
-            "move-home" => Some(Self::MoveHome),
-            "move-end" => Some(Self::MoveEnd),
-            "copy-path" => Some(Self::CopyPath),
-            "delete-worktree" => Some(Self::DeleteWorktree),
-            "toggle-remotes" => Some(Self::ToggleRemotes),
-            "edit-tags" => Some(Self::EditTags),
-            "cycle-sort" => Some(Self::CycleSort),
-            "clear-input" => Some(Self::ClearInput),
-            "remove-last-tag" => Some(Self::RemoveLastTag),
-            "dismiss-overlay" => Some(Self::DismissOverlay),
-            _ => None,
-        }
+        parse_core_action(value)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum BindingTarget {
-    Core(CoreAction),
-    Configured(String),
-    Disabled,
-}
-
-impl BindingTarget {
-    pub(crate) fn parse(value: &str) -> Result<Self, String> {
-        if value == "none" {
-            return Ok(Self::Disabled);
-        }
-        if let Some(action) = CoreAction::parse(value) {
-            return Ok(Self::Core(action));
-        }
-        if is_valid_action_id(value) {
-            return Ok(Self::Configured(value.to_string()));
-        }
-        Err(format!("invalid action identifier: {value}"))
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        match self {
-            Self::Core(action) => action.as_str(),
-            Self::Configured(action) => action,
-            Self::Disabled => "none",
-        }
-    }
-}
-
-pub(crate) fn is_valid_action_id(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('-')
-        && !value.ends_with('-')
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        && !value.as_bytes().windows(2).any(|pair| pair == b"--")
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct KeyChord {
-    pub(crate) code: KeyCode,
-    pub(crate) modifiers: KeyModifiers,
-}
-
-impl KeyChord {
-    pub(crate) fn new(code: KeyCode, modifiers: KeyModifiers) -> Self {
-        let (code, modifiers) = normalize_chord(code, modifiers);
-        Self { code, modifiers }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, String> {
-        let value = value.trim();
-        if value.is_empty() {
-            return Err("key chord cannot be empty".to_string());
-        }
-
-        if value.chars().count() == 1 {
-            return Ok(Self::new(
-                KeyCode::Char(value.chars().next().expect("one character was checked")),
-                KeyModifiers::NONE,
-            ));
-        }
-
-        let normalized = value.replace('+', "-");
-        let mut remaining = normalized.as_str();
-        let mut modifiers = KeyModifiers::NONE;
-        while let Some((prefix, rest)) = remaining.split_once('-') {
-            let modifier = match prefix.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => KeyModifiers::CONTROL,
-                "alt" | "option" => KeyModifiers::ALT,
-                "shift" => KeyModifiers::SHIFT,
-                "super" | "cmd" | "command" => KeyModifiers::SUPER,
-                _ => break,
-            };
-            if modifiers.contains(modifier) {
-                return Err(format!("duplicate key modifier: {prefix}"));
-            }
-            modifiers.insert(modifier);
-            remaining = rest;
-        }
-
-        let code = parse_key_code(remaining)
-            .ok_or_else(|| format!("invalid or unsupported key: {remaining}"))?;
-        Ok(Self::new(code, modifiers))
-    }
-
-    pub(crate) fn as_str(self) -> String {
-        let mut parts = Vec::with_capacity(5);
-        if self.modifiers.contains(KeyModifiers::CONTROL) {
-            parts.push("ctrl".to_string());
-        }
-        if self.modifiers.contains(KeyModifiers::ALT) {
-            parts.push("alt".to_string());
-        }
-        if self.modifiers.contains(KeyModifiers::SHIFT) {
-            parts.push("shift".to_string());
-        }
-        if self.modifiers.contains(KeyModifiers::SUPER) {
-            parts.push("super".to_string());
-        }
-        parts.push(format_key_code(self.code));
-        parts.join("+")
-    }
-
-    pub(crate) fn matches_event(self, event: &KeyEvent) -> bool {
-        matches!(event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-            && self == Self::new(event.code, event.modifiers)
+const fn core_action_as_str(action: CoreAction) -> &'static str {
+    match action {
+        CoreAction::Navigate => "navigate",
+        CoreAction::Actions => "actions",
+        CoreAction::Create => "create",
+        CoreAction::Run => "run",
+        CoreAction::RunAndClose => "run-and-close",
+        CoreAction::Cancel => "cancel",
+        CoreAction::Back => "back",
+        CoreAction::Confirm => "confirm",
+        CoreAction::Accept => "accept",
+        CoreAction::MoveUp => "move-up",
+        CoreAction::MoveDown => "move-down",
+        CoreAction::MoveLeft => "move-left",
+        CoreAction::MoveRight => "move-right",
+        CoreAction::PageUp => "page-up",
+        CoreAction::PageDown => "page-down",
+        CoreAction::MoveHome => "move-home",
+        CoreAction::MoveEnd => "move-end",
+        CoreAction::CopyPath => "copy-path",
+        CoreAction::DeleteWorktree => "delete-worktree",
+        CoreAction::ToggleRemotes => "toggle-remotes",
+        CoreAction::EditTags => "edit-tags",
+        CoreAction::CycleSort => "cycle-sort",
+        CoreAction::ClearInput => "clear-input",
+        CoreAction::RemoveLastTag => "remove-last-tag",
+        CoreAction::DismissOverlay => "dismiss-overlay",
     }
 }
 
-impl Ord for KeyChord {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.code
-            .partial_cmp(&other.code)
-            .expect("crossterm key code ordering is total")
-            .then_with(|| {
-                self.modifiers
-                    .partial_cmp(&other.modifiers)
-                    .expect("crossterm modifier ordering is total")
-            })
+fn parse_core_action(value: &str) -> Option<CoreAction> {
+    match value {
+        "navigate" => Some(CoreAction::Navigate),
+        "actions" => Some(CoreAction::Actions),
+        "create" => Some(CoreAction::Create),
+        "run" => Some(CoreAction::Run),
+        "run-and-close" => Some(CoreAction::RunAndClose),
+        "cancel" => Some(CoreAction::Cancel),
+        "back" => Some(CoreAction::Back),
+        "confirm" => Some(CoreAction::Confirm),
+        "accept" => Some(CoreAction::Accept),
+        "move-up" => Some(CoreAction::MoveUp),
+        "move-down" => Some(CoreAction::MoveDown),
+        "move-left" => Some(CoreAction::MoveLeft),
+        "move-right" => Some(CoreAction::MoveRight),
+        "page-up" => Some(CoreAction::PageUp),
+        "page-down" => Some(CoreAction::PageDown),
+        "move-home" => Some(CoreAction::MoveHome),
+        "move-end" => Some(CoreAction::MoveEnd),
+        "copy-path" => Some(CoreAction::CopyPath),
+        "delete-worktree" => Some(CoreAction::DeleteWorktree),
+        "toggle-remotes" => Some(CoreAction::ToggleRemotes),
+        "edit-tags" => Some(CoreAction::EditTags),
+        "cycle-sort" => Some(CoreAction::CycleSort),
+        "clear-input" => Some(CoreAction::ClearInput),
+        "remove-last-tag" => Some(CoreAction::RemoveLastTag),
+        "dismiss-overlay" => Some(CoreAction::DismissOverlay),
+        _ => None,
     }
 }
 
-impl PartialOrd for KeyChord {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+// The keybinding engine (chord parsing, targets, keymap resolution) lives in
+// gator; navgator supplies its own contexts and actions and reuses the engine.
+pub(crate) use gator::keymap::{is_valid_action_id, KeyChord};
+
+pub(crate) type BindingTarget = gator::keymap::BindingTarget<CoreAction>;
+pub(crate) type Binding = gator::keymap::Binding<CoreAction>;
+pub(crate) type Keymap = gator::keymap::Keymap<BindingContext, CoreAction>;
+
+impl gator::keymap::BindingContext for BindingContext {
+    fn as_str(self) -> &'static str {
+        binding_context_as_str(self)
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        parse_binding_context(value)
+    }
+
+    fn ordered() -> &'static [Self] {
+        &Self::ORDERED
+    }
+
+    fn fallback_contexts(self) -> &'static [Self] {
+        fallback_contexts(self)
     }
 }
 
-impl fmt::Display for KeyChord {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.as_str())
-    }
-}
-
-fn normalize_chord(code: KeyCode, mut modifiers: KeyModifiers) -> (KeyCode, KeyModifiers) {
-    match code {
-        KeyCode::BackTab => {
-            modifiers.insert(KeyModifiers::SHIFT);
-            (KeyCode::Tab, modifiers)
-        }
-        KeyCode::Char(character) if character.is_ascii_uppercase() => {
-            modifiers.insert(KeyModifiers::SHIFT);
-            (KeyCode::Char(character.to_ascii_lowercase()), modifiers)
-        }
-        _ => (code, modifiers),
-    }
-}
-
-fn parse_key_code(value: &str) -> Option<KeyCode> {
-    if value.chars().count() == 1 {
-        return value.chars().next().map(KeyCode::Char);
+impl gator::keymap::CoreAction for CoreAction {
+    fn as_str(self) -> &'static str {
+        core_action_as_str(self)
     }
 
-    let normalized = value.to_ascii_lowercase();
-    let named = match normalized.as_str() {
-        "enter" => KeyCode::Enter,
-        "space" => KeyCode::Char(' '),
-        "tab" => KeyCode::Tab,
-        "backtab" => KeyCode::BackTab,
-        "esc" => KeyCode::Esc,
-        "backspace" => KeyCode::Backspace,
-        "delete" => KeyCode::Delete,
-        "insert" => KeyCode::Insert,
-        "left" => KeyCode::Left,
-        "right" => KeyCode::Right,
-        "up" => KeyCode::Up,
-        "down" => KeyCode::Down,
-        "home" => KeyCode::Home,
-        "end" => KeyCode::End,
-        "pageup" => KeyCode::PageUp,
-        "pagedown" => KeyCode::PageDown,
-        "null" => KeyCode::Null,
-        "caps-lock" => KeyCode::CapsLock,
-        "scroll-lock" => KeyCode::ScrollLock,
-        "num-lock" => KeyCode::NumLock,
-        "print-screen" => KeyCode::PrintScreen,
-        "pause" => KeyCode::Pause,
-        "menu" => KeyCode::Menu,
-        "keypad-begin" => KeyCode::KeypadBegin,
-        "plus" => KeyCode::Char('+'),
-        "equals" => KeyCode::Char('='),
-        "colon" => KeyCode::Char(':'),
-        "semicolon" => KeyCode::Char(';'),
-        "comma" => KeyCode::Char(','),
-        "period" => KeyCode::Char('.'),
-        "minus" => KeyCode::Char('-'),
-        "slash" => KeyCode::Char('/'),
-        "backslash" => KeyCode::Char('\\'),
-        "quote" => KeyCode::Char('\''),
-        "backtick" => KeyCode::Char('`'),
-        "left-bracket" => KeyCode::Char('['),
-        "right-bracket" => KeyCode::Char(']'),
-        _ => {
-            if let Some(number) = normalized
-                .strip_prefix('f')
-                .and_then(|number| number.parse().ok())
-            {
-                if (1..=35).contains(&number) {
-                    return Some(KeyCode::F(number));
-                }
-            }
-            return None;
-        }
-    };
-    Some(named)
-}
-
-fn format_key_code(code: KeyCode) -> String {
-    match code {
-        KeyCode::Backspace => "backspace".to_string(),
-        KeyCode::Enter => "enter".to_string(),
-        KeyCode::Left => "left".to_string(),
-        KeyCode::Right => "right".to_string(),
-        KeyCode::Up => "up".to_string(),
-        KeyCode::Down => "down".to_string(),
-        KeyCode::Home => "home".to_string(),
-        KeyCode::End => "end".to_string(),
-        KeyCode::PageUp => "pageup".to_string(),
-        KeyCode::PageDown => "pagedown".to_string(),
-        KeyCode::Tab => "tab".to_string(),
-        KeyCode::BackTab => "backtab".to_string(),
-        KeyCode::Delete => "delete".to_string(),
-        KeyCode::Insert => "insert".to_string(),
-        KeyCode::F(number) => format!("f{number}"),
-        KeyCode::Char(' ') => "space".to_string(),
-        KeyCode::Char('+') => "plus".to_string(),
-        KeyCode::Char('=') => "equals".to_string(),
-        KeyCode::Char(':') => "colon".to_string(),
-        KeyCode::Char(';') => "semicolon".to_string(),
-        KeyCode::Char(',') => "comma".to_string(),
-        KeyCode::Char('.') => "period".to_string(),
-        KeyCode::Char('-') => "minus".to_string(),
-        KeyCode::Char('/') => "slash".to_string(),
-        KeyCode::Char('\\') => "backslash".to_string(),
-        KeyCode::Char('\'') => "quote".to_string(),
-        KeyCode::Char('`') => "backtick".to_string(),
-        KeyCode::Char('[') => "left-bracket".to_string(),
-        KeyCode::Char(']') => "right-bracket".to_string(),
-        KeyCode::Char(character) => character.to_string(),
-        KeyCode::Null => "null".to_string(),
-        KeyCode::Esc => "esc".to_string(),
-        KeyCode::CapsLock => "caps-lock".to_string(),
-        KeyCode::ScrollLock => "scroll-lock".to_string(),
-        KeyCode::NumLock => "num-lock".to_string(),
-        KeyCode::PrintScreen => "print-screen".to_string(),
-        KeyCode::Pause => "pause".to_string(),
-        KeyCode::Menu => "menu".to_string(),
-        KeyCode::KeypadBegin => "keypad-begin".to_string(),
-        KeyCode::Media(_) | KeyCode::Modifier(_) => "unsupported".to_string(),
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Binding {
-    pub(crate) chord: KeyChord,
-    pub(crate) target: BindingTarget,
-}
-
-impl Binding {
-    pub(crate) const fn new(chord: KeyChord, target: BindingTarget) -> Self {
-        Self { chord, target }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Keymap {
-    bindings: BTreeMap<BindingContext, Vec<Binding>>,
-}
-
-impl Keymap {
-    pub(crate) fn set(&mut self, context: BindingContext, binding: Binding) {
-        let bindings = self.bindings.entry(context).or_default();
-        if let Some(existing) = bindings
-            .iter_mut()
-            .find(|existing| existing.chord == binding.chord)
-        {
-            *existing = binding;
-        } else {
-            bindings.push(binding);
-        }
-    }
-
-    pub(crate) fn remove_target(&mut self, context: BindingContext, target: &BindingTarget) {
-        if let Some(bindings) = self.bindings.get_mut(&context) {
-            bindings.retain(|binding| &binding.target != target);
-        }
-    }
-
-    pub(crate) fn apply_layer(&mut self, layer: &Self) {
-        for (context, binding) in layer.iter() {
-            self.set(context, binding.clone());
-        }
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (BindingContext, &Binding)> {
-        self.bindings
-            .iter()
-            .flat_map(|(&context, bindings)| bindings.iter().map(move |binding| (context, binding)))
-    }
-
-    pub(crate) fn validate_targets(
-        &self,
-        mut validate: impl FnMut(BindingContext, &BindingTarget) -> Result<(), String>,
-    ) -> Result<(), String> {
-        for (context, binding) in self.iter() {
-            validate(context, &binding.target).map_err(|error| {
-                format!(
-                    "invalid keybinding {}.{}: {error}",
-                    context.as_str(),
-                    binding.chord
-                )
-            })?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn resolve(
-        &self,
-        context: BindingContext,
-        event: &KeyEvent,
-    ) -> Option<&BindingTarget> {
-        if event.kind == KeyEventKind::Release {
-            return None;
-        }
-        for &candidate in fallback_contexts(context) {
-            if let Some(binding) = self
-                .bindings_for_context(candidate)
-                .iter()
-                .find(|binding| binding.chord.matches_event(event))
-            {
-                return Some(&binding.target);
-            }
-        }
-        None
-    }
-
-    pub(crate) fn first_chord_for_target(
-        &self,
-        context: BindingContext,
-        target: &BindingTarget,
-    ) -> Option<KeyChord> {
-        let contexts = fallback_contexts(context);
-        for (index, &candidate) in contexts.iter().enumerate() {
-            for binding in self.bindings_for_context(candidate) {
-                let shadowed = contexts[..index].iter().any(|&more_specific| {
-                    self.bindings_for_context(more_specific)
-                        .iter()
-                        .any(|other| other.chord == binding.chord)
-                });
-                if !shadowed && &binding.target == target {
-                    return Some(binding.chord);
-                }
-            }
-        }
-        None
-    }
-
-    pub(crate) fn bindings_for_context(&self, context: BindingContext) -> &[Binding] {
-        self.bindings
-            .get(&context)
-            .map(Vec::as_slice)
-            .unwrap_or_default()
+    fn parse(value: &str) -> Option<Self> {
+        parse_core_action(value)
     }
 }
 
@@ -741,6 +422,7 @@ pub(crate) fn default_keymap() -> Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyEvent, KeyEventKind};
     use std::collections::{BTreeSet, HashSet};
 
     fn core(action: CoreAction) -> BindingTarget {

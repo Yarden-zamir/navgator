@@ -6,6 +6,8 @@ use crate::model::{
 };
 use crate::search::{entry_match_context, QueryTokens};
 use gator::fuzzy_match;
+use gator::text::hsl_to_rgb;
+pub(crate) use gator::text::rect_contains;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -534,13 +536,6 @@ pub(crate) fn compute_ui_layout(size: Rect, show_detail: bool) -> UiLayout {
         detail_panel_area,
         help_area: chunks[1],
     }
-}
-
-pub(crate) fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
-    col >= rect.x
-        && col < rect.x.saturating_add(rect.width)
-        && row >= rect.y
-        && row < rect.y.saturating_add(rect.height)
 }
 
 pub(crate) fn preview_content_area(area: Rect, tab_count: usize) -> Rect {
@@ -1104,33 +1099,6 @@ fn tag_color(tag: &str, fallback: Color) -> Color {
     }
     let hue = (hash % 360) as f32;
     hsl_to_rgb(hue, 0.6, 0.55).unwrap_or(fallback)
-}
-
-fn hsl_to_rgb(hue: f32, sat: f32, light: f32) -> Option<Color> {
-    if !(0.0..=360.0).contains(&hue) {
-        return None;
-    }
-    let c = (1.0 - (2.0 * light - 1.0).abs()) * sat;
-    let h = hue / 60.0;
-    let x = c * (1.0 - (h % 2.0 - 1.0).abs());
-    let (r1, g1, b1) = if (0.0..1.0).contains(&h) {
-        (c, x, 0.0)
-    } else if (1.0..2.0).contains(&h) {
-        (x, c, 0.0)
-    } else if (2.0..3.0).contains(&h) {
-        (0.0, c, x)
-    } else if (3.0..4.0).contains(&h) {
-        (0.0, x, c)
-    } else if (4.0..5.0).contains(&h) {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-    let m = light - c / 2.0;
-    let r = ((r1 + m) * 255.0).round().clamp(0.0, 255.0) as u8;
-    let g = ((g1 + m) * 255.0).round().clamp(0.0, 255.0) as u8;
-    let b = ((b1 + m) * 255.0).round().clamp(0.0, 255.0) as u8;
-    Some(Color::Rgb(r, g, b))
 }
 
 pub(crate) fn render_side_panels(frame: &mut ratatui::Frame, render: SidePanelRender<'_>) {

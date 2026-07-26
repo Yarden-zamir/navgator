@@ -1,5 +1,4 @@
 use crate::commands::{run_command_output, run_git_command_allow_empty};
-use crate::config::home_dir;
 use crate::git::{
     git_command_dir_for_path, git_default_branch_for_path, git_is_bare_repository,
     git_is_inside_work_tree, git_worktree_label, git_worktrees_for_path,
@@ -9,38 +8,16 @@ use crate::model::{
     PreviewTarget,
 };
 use crate::search::entry_name;
-use ansi_to_tui::IntoText;
+use gator::config::home_dir;
+use gator::text::{lines_from_ansi_output, lines_from_output};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
 };
-use std::{collections::HashSet, env, fs, path::Path, process::Command, sync::mpsc, thread};
+use std::{collections::HashSet, fs, path::Path, process::Command, sync::mpsc, thread};
 
 pub(crate) fn display_path_for_user(path: &str) -> String {
-    match env::var("HOME") {
-        Ok(home) => display_path_with_home(path, &home),
-        Err(_) => path.to_string(),
-    }
-}
-
-pub(crate) fn display_path_with_home(path: &str, home: &str) -> String {
-    if home.is_empty() {
-        return path.to_string();
-    }
-    if path == home {
-        return "~".to_string();
-    }
-
-    let home_with_separator = format!(
-        "{}{}",
-        home.trim_end_matches(std::path::MAIN_SEPARATOR),
-        std::path::MAIN_SEPARATOR
-    );
-    if let Some(rest) = path.strip_prefix(&home_with_separator) {
-        return format!("~/{}", rest);
-    }
-
-    path.to_string()
+    gator::text::collapse_home_env(path)
 }
 
 pub(crate) fn build_placeholder_text(
@@ -597,24 +574,4 @@ fn erd_default_args() -> Vec<String> {
         "--human".to_string(),
         "--suppress-size".to_string(),
     ]
-}
-
-fn lines_from_output(output: &str, style: Style, max_lines: usize) -> Vec<Line<'static>> {
-    output
-        .lines()
-        .take(max_lines)
-        .map(|line| Line::from(Span::styled(line.to_string(), style)))
-        .collect()
-}
-
-fn lines_from_ansi_output(output: &str, style: Style, max_lines: usize) -> Vec<Line<'static>> {
-    let text_result = output.as_bytes().to_vec().into_text();
-    let Ok(text) = text_result else {
-        return lines_from_output(output, style, max_lines);
-    };
-    text.lines
-        .into_iter()
-        .take(max_lines)
-        .map(|line| line.style(style))
-        .collect()
 }

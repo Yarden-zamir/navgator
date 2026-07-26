@@ -5,9 +5,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
-    env, fs,
-    fs::{File, OpenOptions},
-    io::{self, Write},
+    fs, io,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -68,22 +66,7 @@ pub(crate) fn record_access(path: &str) -> io::Result<()> {
 }
 
 fn record_access_at(state_path: &Path, target_path: &str, timestamp: i64) -> io::Result<()> {
-    let Some(parent) = state_path.parent() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Access state path has no parent directory",
-        ));
-    };
-    fs::create_dir_all(parent)?;
-
-    let lock_path = state_path.with_extension("json.lock");
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(lock_path)?;
-    lock_file.lock()?;
+    let _lock = gator::xdg::lock_sibling(state_path)?;
 
     let mut state = load_state(state_path)?;
     let key = path_key(target_path)?;
@@ -120,36 +103,18 @@ fn load_state(path: &Path) -> io::Result<AccessState> {
 }
 
 fn save_state(path: &Path, state: &AccessState) -> io::Result<()> {
-    let temp_path = path.with_extension("json.tmp");
-    let contents = serde_json::to_vec(state).map_err(io::Error::other)?;
-    let mut temp_file = File::create(&temp_path)?;
-    temp_file.write_all(&contents)?;
-    temp_file.sync_all()?;
-    fs::rename(temp_path, path)
+    gator::xdg::write_json_atomic(path, state)
 }
 
 fn state_file_path() -> io::Result<PathBuf> {
-    let state_root = env::var_os("XDG_STATE_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME")
-                .filter(|value| !value.is_empty())
-                .map(|home| PathBuf::from(home).join(".local").join("state"))
-        })
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "Cannot locate navgator state: XDG_STATE_HOME and HOME are unset",
-            )
-        })?;
-    Ok(state_root.join(STATE_DIR_NAME).join(ACCESS_FILE_NAME))
+    gator::xdg::state_file(STATE_DIR_NAME, ACCESS_FILE_NAME)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::NavigateEntryKind;
+    use std::env;
 
     #[test]
     fn records_only_the_latest_access_for_a_target() {

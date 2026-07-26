@@ -40,6 +40,7 @@ use content::{
     apply_git_result, apply_github_readme_result, build_placeholder_text, build_preview_data,
     build_remote_branch_preview_data, ensure_git_for_preview,
 };
+use gator::text::{centered_rect, render_progress_bar};
 use gator::{copy_to_clipboard, ensure_tty_stdin, input_at_end, setup_terminal, write_selection};
 use github::ensure_github_readme_for_preview;
 use metadata::{ensure_dates_for_paths, spawn_bulk_metadata_fetch};
@@ -3726,27 +3727,6 @@ fn render_create_suggestion_panel(
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
 }
 
-fn render_progress_bar(progress: f64, width: usize, fill: Color, empty: Color) -> Line<'static> {
-    let bar_width = width.saturating_sub(6).clamp(8, 72);
-    let filled = ((bar_width as f64) * progress).round() as usize;
-    let empty_count = bar_width.saturating_sub(filled);
-    Line::from(vec![
-        Span::styled("[", Style::default().fg(empty)),
-        Span::styled("█".repeat(filled), Style::default().fg(fill)),
-        Span::styled("░".repeat(empty_count), Style::default().fg(empty)),
-        Span::styled("]", Style::default().fg(empty)),
-    ])
-}
-
-fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    }
-}
-
 fn apply_preview_for_entry(
     compositor: &mut CurrentCompositor,
     data: &PreviewData,
@@ -4763,22 +4743,6 @@ mod tests {
 
         assert_eq!(worktrees[0].branch.as_deref(), Some("trunk"));
         assert_eq!(worktrees[1].branch.as_deref(), Some("feature"));
-    }
-
-    #[test]
-    fn displays_home_paths_with_tilde() {
-        assert_eq!(
-            content::display_path_with_home("/Users/kcw", "/Users/kcw"),
-            "~"
-        );
-        assert_eq!(
-            content::display_path_with_home("/Users/kcw/Github/navgator", "/Users/kcw"),
-            "~/Github/navgator"
-        );
-        assert_eq!(
-            content::display_path_with_home("/Users/kcw-other/Github", "/Users/kcw"),
-            "/Users/kcw-other/Github"
-        );
     }
 
     #[test]

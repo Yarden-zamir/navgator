@@ -1,5 +1,6 @@
 use crate::model::{MatchScore, NavigateEntry, SortMeta, SortMode};
 use gator::fuzzy_match;
+use gator::search::match_score;
 use std::{cmp::Ordering, collections::HashMap, path::Path};
 
 #[derive(Default)]
@@ -357,62 +358,6 @@ fn compare_time(
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     }
-}
-
-fn match_score(query: &str, text: &str) -> Option<MatchScore> {
-    let qchars: Vec<char> = query.chars().filter(|c| !c.is_whitespace()).collect();
-    if qchars.is_empty() {
-        return Some((0, 0, 0, 0, text.chars().count()));
-    }
-
-    if let Some(start) = find_case_insensitive(text, query) {
-        let span = qchars.len().saturating_sub(1);
-        return Some((0, span, 0, start, text.chars().count()));
-    }
-
-    let mut positions: Vec<usize> = Vec::with_capacity(qchars.len());
-    let mut qi = 0usize;
-    for (ti, t) in text.chars().enumerate() {
-        if qi >= qchars.len() {
-            break;
-        }
-        if qchars[qi].eq_ignore_ascii_case(&t) {
-            positions.push(ti);
-            qi += 1;
-        }
-    }
-
-    if qi < qchars.len() {
-        return None;
-    }
-
-    let start = *positions.first().unwrap_or(&0);
-    let end = *positions.last().unwrap_or(&start);
-    let span = end.saturating_sub(start);
-    let mut gaps = 0usize;
-    for window in positions.windows(2) {
-        if let [prev, next] = window {
-            gaps = gaps.saturating_add(next.saturating_sub(prev + 1));
-        }
-    }
-    let text_len = text.chars().count();
-    Some((1, span, gaps, start, text_len))
-}
-
-fn find_case_insensitive(text: &str, needle: &str) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
-    }
-    let text_lower = text.to_lowercase();
-    let needle_lower = needle.to_lowercase();
-    let byte_index = text_lower.find(&needle_lower)?;
-    Some(char_index_from_byte(text, byte_index))
-}
-
-fn char_index_from_byte(text: &str, byte_index: usize) -> usize {
-    text.char_indices()
-        .take_while(|(idx, _)| *idx < byte_index)
-        .count()
 }
 
 #[cfg(test)]

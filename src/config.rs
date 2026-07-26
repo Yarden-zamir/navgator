@@ -9,13 +9,10 @@ use crate::model::{
     CreateDefinition, CreatePrompt, CreatePromptKind, CreateSettings, LoadedConfig,
     PreviewSettings, RemoteSettings, SortMode, SortSettings, ThemeColors, CONFIG_SCHEMA_URL,
 };
-use figment::providers::{Format, Toml};
-use figment::Figment;
-use schemars::{schema_for, JsonSchema};
+use schemars::JsonSchema;
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashSet},
-    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -101,11 +98,7 @@ struct ConfigLoadState {
     cli_keybinding_layer: Keymap,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ConfigLayerSource {
-    File,
-    Cli,
-}
+use gator::config::LayerSource as ConfigLayerSource;
 
 impl ConfigLoadState {
     fn new() -> Self {
@@ -710,56 +703,34 @@ impl ConfigTheme {
 }
 
 pub(crate) fn config_schema_json() -> AppResult<String> {
-    let schema = schema_for!(ConfigFile);
-    serde_json::to_string_pretty(&schema)
-        .map_err(|err| format!("Failed to serialize config schema: {err}").into())
+    gator::config::schema_json::<ConfigFile>()
+}
+
+impl gator::config::AppConfig for ConfigFile {
+    fn has_schema_url(&self) -> bool {
+        self._schema_url.is_some()
+    }
 }
 
 pub(crate) fn load_config(config_entries: &[String]) -> AppResult<LoadedConfig> {
-    let home = home_dir()?;
-    let mut state = ConfigLoadState::new();
-    let mut found_config = false;
+    let default_contents = default_config_contents();
+    navgator_config_loader(&default_contents).load(
+        config_entries,
+        ConfigLoadState::new(),
+        |state: &mut ConfigLoadState, config, base_dir, home, source| {
+            state.apply_config_file(config, base_dir, home, source)
+        },
+        ConfigLoadState::into_loaded_config,
+    )
+}
 
-    for path in config_paths(&home) {
-        if !path.is_file() {
-            continue;
-        }
-        found_config = true;
-        let base_dir = path.parent().unwrap_or(&home);
-        let config: ConfigFile = Figment::from(Toml::file(&path)).extract().map_err(|err| {
-            let display_path = display_path_for_user(&path.to_string_lossy());
-            format!("Failed to parse config {}: {}", display_path, err)
-        })?;
-        ensure_schema_link_in_config_file(&path, &config);
-        state.apply_config_file(config, base_dir, &home, ConfigLayerSource::File)?;
+fn navgator_config_loader(default_contents: &str) -> gator::config::ConfigLoader<'_> {
+    gator::config::ConfigLoader {
+        app_name: "navgator",
+        env_var: "NAVGATOR_CONFIG",
+        schema_url: CONFIG_SCHEMA_URL,
+        default_contents,
     }
-
-    if !found_config {
-        let path = create_default_config(&home)?;
-        return load_config_from_created_file(path, config_entries);
-    }
-
-    let base_dir = env::current_dir().unwrap_or_else(|_| home.clone());
-    for (index, entry) in config_entries.iter().enumerate() {
-        let config: ConfigFile = Figment::from(Toml::string(entry))
-            .extract()
-            .map_err(|err| {
-                format!(
-                    "Failed to parse config entry {} ({entry:?}): {err}",
-                    index + 1
-                )
-            })?;
-        state
-            .apply_config_file(config, &base_dir, &home, ConfigLayerSource::Cli)
-            .map_err(|err| {
-                format!(
-                    "Failed to apply config entry {} ({entry:?}): {err}",
-                    index + 1
-                )
-            })?;
-    }
-
-    state.into_loaded_config()
 }
 
 fn config_runtime_defaults() -> ConfigRuntimeDefaults {
@@ -780,14 +751,14 @@ impl ConfigLoadState {
         source: ConfigLayerSource,
     ) -> AppResult<()> {
         if let Some(paths) = config.paths {
-            merge_paths(
+            gator::config::merge_paths(
                 &paths.index_folders,
                 base_dir,
                 home,
                 &mut self.index_folders,
                 &mut self.seen_index,
             );
-            merge_paths(
+            gator::config::merge_paths(
                 &paths.static_items,
                 base_dir,
                 home,
@@ -1121,68 +1092,6 @@ fn legacy_binding_chord(key: &ActionBindingKey) -> Option<KeyChord> {
     KeyChord::parse(value).ok()
 }
 
-pub(crate) fn home_dir() -> AppResult<PathBuf> {
-    let value = env::var("HOME").map_err(|_| "HOME is not set")?;
-    Ok(PathBuf::from(value))
-}
-
-fn ensure_schema_link_in_config_file(path: &Path, config: &ConfigFile) {
-    if config._schema_url.is_some() {
-        return;
-    }
-
-    let Ok(contents) = fs::read_to_string(path) else {
-        return;
-    };
-
-    let schema_line = format!("\"$schema\" = \"{CONFIG_SCHEMA_URL}\"");
-    let updated = if contents.trim().is_empty() {
-        format!("{schema_line}\n")
-    } else if contents.starts_with('\n') {
-        format!("{schema_line}\n{contents}")
-    } else {
-        format!("{schema_line}\n\n{contents}")
-    };
-
-    if updated != contents {
-        let _ = fs::write(path, updated);
-    }
-}
-
-fn create_default_config(home: &Path) -> AppResult<PathBuf> {
-    let path = default_config_path(home);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "Failed to create config directory {}: {err}",
-                display_path_for_user(&parent.to_string_lossy())
-            )
-        })?;
-    }
-    fs::write(&path, default_config_contents()).map_err(|err| {
-        format!(
-            "Failed to create default config {}: {err}",
-            display_path_for_user(&path.to_string_lossy())
-        )
-    })?;
-    Ok(path)
-}
-
-fn load_config_from_created_file(
-    _path: PathBuf,
-    config_entries: &[String],
-) -> AppResult<LoadedConfig> {
-    load_config(config_entries)
-}
-
-fn default_config_path(home: &Path) -> PathBuf {
-    if let Some(path) = env_path("NAVGATOR_CONFIG") {
-        return path;
-    }
-    let xdg = config_home(home);
-    xdg.join("navgator/config.toml")
-}
-
 fn default_config_contents() -> String {
     let actions = default_actions_config_contents();
     let create = default_create_config_contents();
@@ -1332,118 +1241,11 @@ fn create_prompt_kind_name(kind: CreatePromptKind) -> &'static str {
 }
 
 fn toml_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    gator::config::toml_string(value)
 }
 
 fn auto_theme_colors() -> ThemeColors {
-    if os_prefers_dark_theme() {
-        ThemeColors::dark()
-    } else {
-        ThemeColors::light()
-    }
-}
-
-fn os_prefers_dark_theme() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("defaults")
-            .arg("read")
-            .arg("-g")
-            .arg("AppleInterfaceStyle")
-            .output()
-            .map(|output| {
-                output.status.success()
-                    && String::from_utf8_lossy(&output.stdout)
-                        .trim()
-                        .eq_ignore_ascii_case("Dark")
-            })
-            .unwrap_or(false)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
-    }
-}
-
-fn config_paths(home: &Path) -> Vec<PathBuf> {
-    if let Some(path) = env_path("NAVGATOR_CONFIG") {
-        return vec![path];
-    }
-
-    let mut paths = Vec::new();
-    paths.push(PathBuf::from("/etc/navgator/config.toml"));
-    let xdg = config_home(home);
-    paths.push(xdg.join("navgator/config.toml"));
-    paths.push(home.join(".config/navgator/config.toml"));
-    paths.push(home.join(".navgator.toml"));
-    if let Ok(cwd) = env::current_dir() {
-        paths.push(cwd.join(".navgator.toml"));
-        paths.push(cwd.join(".navgator/config.toml"));
-    }
-
-    let mut seen = HashSet::new();
-    let mut unique = Vec::new();
-    for path in paths {
-        let key = path.to_string_lossy().to_string();
-        if seen.insert(key) {
-            unique.push(path);
-        }
-    }
-    unique
-}
-
-fn env_path(name: &str) -> Option<PathBuf> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-}
-
-fn config_home(home: &Path) -> PathBuf {
-    env_path("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))
-}
-
-fn merge_paths(
-    raw_paths: &[String],
-    base_dir: &Path,
-    home: &Path,
-    target: &mut Vec<PathBuf>,
-    seen: &mut HashSet<String>,
-) {
-    for raw in raw_paths {
-        if let Some(path) = normalize_path(raw, base_dir, home) {
-            let key = path.to_string_lossy().to_string();
-            if seen.insert(key) {
-                target.push(path);
-            }
-        }
-    }
-}
-
-fn normalize_path(raw: &str, base_dir: &Path, home: &Path) -> Option<PathBuf> {
-    let path = normalize_configured_path(raw, base_dir, home)?;
-    path.exists().then_some(path)
-}
-
-fn normalize_configured_path(raw: &str, base_dir: &Path, home: &Path) -> Option<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut value = trimmed.to_string();
-    if value.starts_with("~/") {
-        value = value.replacen("~", &home.to_string_lossy(), 1);
-    }
-    if value.contains("$HOME") {
-        value = value.replace("$HOME", &home.to_string_lossy());
-    }
-    let mut path = PathBuf::from(value);
-    if path.is_relative() {
-        path = base_dir.join(path);
-    }
-    Some(path)
+    ThemeColors::from(gator::theme::Palette::for_theme(gator::theme::Theme::Auto))
 }
 
 fn normalize_sort_ignore_paths(
@@ -1453,46 +1255,19 @@ fn normalize_sort_ignore_paths(
 ) -> HashSet<String> {
     raw_paths
         .iter()
-        .filter_map(|raw| normalize_configured_path(raw, base_dir, home))
+        .filter_map(|raw| gator::config::normalize_configured_path(raw, base_dir, home))
         .map(|path| path.to_string_lossy().into_owned())
         .collect()
-}
-
-fn display_path_for_user(path: &str) -> String {
-    match env::var("HOME") {
-        Ok(home) => display_path_with_home(path, &home),
-        Err(_) => path.to_string(),
-    }
-}
-
-fn display_path_with_home(path: &str, home: &str) -> String {
-    if home.is_empty() {
-        return path.to_string();
-    }
-    if path == home {
-        return "~".to_string();
-    }
-
-    let home_with_separator = format!(
-        "{}{}",
-        home.trim_end_matches(std::path::MAIN_SEPARATOR),
-        std::path::MAIN_SEPARATOR
-    );
-    if let Some(rest) = path.strip_prefix(&home_with_separator) {
-        return format!("~/{}", rest);
-    }
-
-    path.to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        action_settings_from_config, config_paths, config_schema_json, create_settings_from_config,
-        default_config_contents, ensure_schema_link_in_config_file, load_config,
-        validate_picker_action_ids, ConfigAction, ConfigActionKind, ConfigActions, ConfigCreate,
-        ConfigCreateItem, ConfigCreatePrompt, ConfigCreatePromptKind, ConfigFile,
-        ConfigLayerSource, ConfigLoadState, ConfigSortMode, CONFIG_SCHEMA_URL,
+        action_settings_from_config, config_schema_json, create_settings_from_config,
+        default_config_contents, load_config, navgator_config_loader, validate_picker_action_ids,
+        ConfigAction, ConfigActionKind, ConfigActions, ConfigCreate, ConfigCreateItem,
+        ConfigCreatePrompt, ConfigCreatePromptKind, ConfigFile, ConfigLayerSource, ConfigLoadState,
+        ConfigSortMode, CONFIG_SCHEMA_URL,
     };
     use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, KeyChord};
     use crate::model::{
@@ -1612,7 +1387,7 @@ on_select = "checkout"
         env::set_var("NAVGATOR_CONFIG", "/tmp/navgator-only.toml");
         env::set_var("XDG_CONFIG_HOME", "/tmp/xdg-config");
 
-        let paths = config_paths(&PathBuf::from("/home/example"));
+        let paths = navgator_config_loader("").config_paths(&PathBuf::from("/home/example"));
 
         restore_env("NAVGATOR_CONFIG", old_navgator);
         restore_env("XDG_CONFIG_HOME", old_xdg);
@@ -1627,7 +1402,7 @@ on_select = "checkout"
         env::remove_var("NAVGATOR_CONFIG");
         env::set_var("XDG_CONFIG_HOME", "");
 
-        let paths = config_paths(&PathBuf::from("/home/example"));
+        let paths = navgator_config_loader("").config_paths(&PathBuf::from("/home/example"));
 
         restore_env("NAVGATOR_CONFIG", old_navgator);
         restore_env("XDG_CONFIG_HOME", old_xdg);
@@ -1644,7 +1419,7 @@ on_select = "checkout"
             ..ConfigFile::default()
         };
 
-        ensure_schema_link_in_config_file(&path, &config);
+        gator::config::ensure_schema_link(&path, CONFIG_SCHEMA_URL, config._schema_url.is_some());
 
         let contents = fs::read_to_string(&path).expect("read temp config");
         let _ = fs::remove_file(&path);

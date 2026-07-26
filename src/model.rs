@@ -10,7 +10,7 @@ pub(crate) mod keybindings;
 use keybindings::Keymap;
 
 pub(crate) type AppResult<T> = Result<T, Box<dyn Error>>;
-pub(crate) type MatchScore = (usize, usize, usize, usize, usize);
+pub(crate) use gator::search::MatchScore;
 
 pub(crate) const DATE_WIDTH: usize = 16;
 pub(crate) const DATE_PLACEHOLDER: &str = "---- -- -- --:--";
@@ -503,22 +503,22 @@ pub(crate) struct ThemeColors {
 
 impl ThemeColors {
     pub(crate) fn light() -> Self {
-        Self {
-            accent: Color::Rgb(72, 166, 255),
-            warm: Color::Rgb(255, 181, 92),
-            key_color: Color::Rgb(150, 150, 150),
-            text: Color::Black,
-            muted: Color::Black,
-        }
+        Self::from(gator::theme::Palette::light())
     }
 
     pub(crate) fn dark() -> Self {
+        Self::from(gator::theme::Palette::dark())
+    }
+}
+
+impl From<gator::theme::Palette> for ThemeColors {
+    fn from(palette: gator::theme::Palette) -> Self {
         Self {
-            accent: Color::Rgb(99, 179, 237),
-            warm: Color::Rgb(251, 191, 36),
-            key_color: Color::Rgb(156, 163, 175),
-            text: Color::Rgb(229, 231, 235),
-            muted: Color::Rgb(156, 163, 175),
+            accent: palette.accent,
+            warm: palette.warm,
+            key_color: palette.key,
+            text: palette.text,
+            muted: palette.muted,
         }
     }
 }

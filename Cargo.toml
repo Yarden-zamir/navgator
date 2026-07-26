@@ -12,7 +12,7 @@ categories = ["command-line-interface", "development-tools"]
 ansi-to-tui = "8.0"
 crossterm = "0.29"
 figment = { version = "0.10", features = ["toml"] }
-gator = { git = "https://github.com/Yarden-zamir/gator", tag = "v0.1.0" }
+gator = { git = "https://github.com/Yarden-zamir/gator", branch = "main" }
 libc = "0.2"
 ratatui = "0.30"
 schemars = { version = "0.8", features = ["derive"] }
