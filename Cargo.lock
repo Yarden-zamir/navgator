@@ -440,12 +440,17 @@ dependencies = [
 
 [[package]]
 name = "gator"
-version = "0.1.0"
-source = "git+https://github.com/Yarden-zamir/gator?branch=main#8591a7188d137cd1656872c492b0496d218b4bf5"
+version = "0.2.0"
+source = "git+https://github.com/Yarden-zamir/gator?branch=main#9e77a825fe6a7c95d8833bdc29cf42f1f1600be0"
 dependencies = [
+ "ansi-to-tui",
  "crossterm",
+ "figment",
  "libc",
  "ratatui",
+ "schemars",
+ "serde",
+ "serde_json",
  "tui-input",
 ]
 
