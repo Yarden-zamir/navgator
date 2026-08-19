@@ -733,6 +733,14 @@ fn navgator_config_loader(default_contents: &str) -> gator::config::ConfigLoader
     }
 }
 
+pub(crate) fn config_file_paths(home: &Path) -> Vec<PathBuf> {
+    navgator_config_loader("").config_paths(home)
+}
+
+pub(crate) fn default_user_config_path(home: &Path) -> PathBuf {
+    navgator_config_loader("").default_config_path(home)
+}
+
 fn config_runtime_defaults() -> ConfigRuntimeDefaults {
     ConfigRuntimeDefaults {
         preview_settings: default_preview_settings(),
@@ -1066,15 +1074,30 @@ fn legacy_binding_chord(key: &ActionBindingKey) -> Option<KeyChord> {
     KeyChord::parse(value).ok()
 }
 
+pub(crate) const DEFAULT_INDEX_FOLDERS: [&str; 2] = ["~/Github", "~/Projects"];
+
 fn default_config_contents() -> String {
+    let folders: Vec<String> = DEFAULT_INDEX_FOLDERS
+        .iter()
+        .map(|folder| folder.to_string())
+        .collect();
+    starter_config_contents(&folders)
+}
+
+pub(crate) fn starter_config_contents(index_folders: &[String]) -> String {
     let actions = default_actions_config_contents();
     let create = default_create_config_contents();
     let keybindings = default_keybindings_config_contents();
+    let index_folders = index_folders
+        .iter()
+        .map(|folder| toml_string(folder))
+        .collect::<Vec<String>>()
+        .join(", ");
     format!(
         r#""$schema" = "{CONFIG_SCHEMA_URL}"
 
 [paths]
-index_folders = ["~/Github", "~/Projects"]
+index_folders = [{index_folders}]
 static_items = []
 
 [sort]
@@ -1238,10 +1261,10 @@ fn normalize_sort_ignore_paths(
 mod tests {
     use super::{
         action_settings_from_config, config_schema_json, create_settings_from_config,
-        default_config_contents, load_config, navgator_config_loader, validate_picker_action_ids,
-        ConfigAction, ConfigActionKind, ConfigActions, ConfigCreate, ConfigCreateItem,
-        ConfigCreatePrompt, ConfigCreatePromptKind, ConfigFile, ConfigLayerSource, ConfigLoadState,
-        ConfigSortMode, CONFIG_SCHEMA_URL,
+        default_config_contents, load_config, navgator_config_loader, starter_config_contents,
+        validate_picker_action_ids, ConfigAction, ConfigActionKind, ConfigActions, ConfigCreate,
+        ConfigCreateItem, ConfigCreatePrompt, ConfigCreatePromptKind, ConfigFile,
+        ConfigLayerSource, ConfigLoadState, ConfigSortMode, CONFIG_SCHEMA_URL,
     };
     use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction, KeyChord};
     use crate::model::{
@@ -1289,6 +1312,18 @@ mod tests {
         assert!(config.contains("[keybindings.navigator]"));
         assert!(config.contains("\"ctrl+enter\" = \"actions\""));
         assert!(config.contains("[keybindings.error-overlay]"));
+    }
+
+    #[test]
+    fn starter_config_uses_provided_index_folders() {
+        let config = starter_config_contents(&["~/Work".to_string(), "~/oss".to_string()]);
+
+        assert!(config.contains("index_folders = [\"~/Work\", \"~/oss\"]"));
+        let parsed = toml_config(&config);
+        assert_eq!(
+            parsed.paths.expect("paths").index_folders,
+            vec!["~/Work".to_string(), "~/oss".to_string()]
+        );
     }
 
     #[test]

@@ -1,5 +1,8 @@
 _NAVGATOR_SCRIPT_PATH="${(%):-%N}"
 _NAVGATOR_SCRIPT_DIR="${_NAVGATOR_SCRIPT_PATH:A:h}"
+# Lets child processes (e.g. `navgator onboarding`) detect that the wrapper
+# is sourced in this shell without reading rc files.
+export NAVGATOR_ZSH_SOURCED="${_NAVGATOR_SCRIPT_PATH:A}"
 
 _navgator_bin() {
   if [[ -n "$NAVGATOR_BIN" && -x "$NAVGATOR_BIN" ]]; then

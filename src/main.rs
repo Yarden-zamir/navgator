@@ -26,6 +26,7 @@ mod git;
 mod github;
 mod metadata;
 mod model;
+mod onboarding;
 mod path_identity;
 mod provider_runtime;
 mod results;
@@ -99,25 +100,72 @@ fn main() -> AppResult<()> {
             &config_entries,
         );
     }
+    if args[0] == "onboarding" || args[0] == "--onboarding" {
+        reject_config_entries(&config_entries);
+        ensure_tty_stdin()?;
+        return onboarding::run_onboarding();
+    }
     if args[0] == "config-schema" || args[0] == "schema" {
         reject_config_entries(&config_entries);
         return print_config_schema();
     }
-    if args[0] == "--help" || args[0] == "-h" {
+    if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
         reject_config_entries(&config_entries);
-        print_usage();
+        println!("{}", help_text());
+        return Ok(());
+    }
+    if args[0] == "--version" || args[0] == "-V" || args[0] == "version" {
+        reject_config_entries(&config_entries);
+        println!("navgator {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
-    eprintln!("Unknown command.");
+    eprintln!("Unknown command: {}", args[0]);
     print_usage();
     std::process::exit(2);
 }
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  navgator [--config-entry TOML]... [navigate|actions [path]|create [recipe] [path]|config-schema]"
+        "Usage:\n  navgator [--config-entry TOML]... [COMMAND]\nRun `navgator --help` for details."
     );
+}
+
+fn help_text() -> String {
+    format!(
+        "\
+🐊 navgator {} — TUI project navigator with Git worktree and preview support
+
+Usage:
+  navgator [OPTIONS] [COMMAND]
+
+Commands:
+  navigate                 Open the navigator (default when no command is given)
+  actions [PATH]           Open the action picker for PATH, or the first result
+                           (alias: action-picker)
+  create [RECIPE] [PATH]   Open the create picker, or run a recipe directly by
+                           label or slug, e.g. `create new-project` (alias: new)
+  onboarding               Interactive walkthrough: creates a starter config and
+                           sets up zsh shortcuts (alias: --onboarding)
+  config-schema            Print the JSON config schema to stdout (alias: schema)
+  help                     Show this help (aliases: --help, -h)
+  version                  Show the version (aliases: --version, -V)
+
+Options (interactive commands only):
+  --config-entry TOML      Override one config entry for this invocation with a
+                           TOML dotted assignment; repeatable, applied in order.
+                           Example: --config-entry 'sort.default=\"alpha-asc\"'
+
+Environment:
+  NAVGATOR_CONFIG          Use only this config file (created if missing)
+  GATOR_OUTPUT             File the selected path is written to instead of stdout
+                           (set by the zsh wrapper)
+
+Note: the binary prints the selected path but cannot change your shell's
+directory; bind shortcuts to the zsh wrapper widgets for that. Run
+`navgator onboarding` to set this up, or see the README.",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 fn split_config_entries(args: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
@@ -3908,6 +3956,30 @@ mod tests {
                 "sort.default=\"alpha-asc\""
             ]
         );
+    }
+
+    #[test]
+    fn help_mentions_every_command_and_alias() {
+        let help = help_text();
+        for name in [
+            "navigate",
+            "actions",
+            "action-picker",
+            "create",
+            "new",
+            "onboarding",
+            "--onboarding",
+            "config-schema",
+            "schema",
+            "help",
+            "version",
+            "--config-entry",
+            "NAVGATOR_CONFIG",
+            "GATOR_OUTPUT",
+        ] {
+            assert!(help.contains(name), "help text is missing `{name}`");
+        }
+        assert!(help.contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]

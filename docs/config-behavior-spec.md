@@ -19,10 +19,14 @@
 - `navgator` without arguments behaves like `navgator navigate`.
 - `navgator actions` loads config and opens directly to the action picker for the first result.
 - `navgator actions <path>` loads config and opens directly to the action picker for the provided path.
+- `navgator onboarding` runs the interactive onboarding walkthrough specified in `docs/onboarding-spec.md`.
+- `navgator --onboarding` is an alias for `navgator onboarding`.
+- Onboarding creates the starter config at the default user config path when discovery finds none, honoring `NAVGATOR_CONFIG`; an existing config is replaced only after explicit confirmation with a `.bak` backup.
+- The starter config created by onboarding uses the index folders the user entered; everything else matches written defaults.
 - Interactive commands accept repeatable `--config-entry <toml>` and `--config-entry=<toml>` options.
 - Config entries are parsed as TOML fragments and applied in argument order after discovered config files.
 - A CLI config entry containing only `actions.picker` preserves effective action definitions and overrides picker visibility for that invocation.
-- Schema and help commands reject `--config-entry`.
+- Schema, help, version, and onboarding commands reject `--config-entry`.
 
 ## Discovery
 
@@ -244,6 +248,8 @@
 ## Documentation
 
 - README must mention `navgator config-schema`.
+- README must document `navgator onboarding`.
+- README must document that the binary cannot change the parent shell's directory and that the zsh wrapper widgets perform the `cd`.
 - README must document the zsh wrapper relationship with `GATOR_OUTPUT`.
 - README must document action picker bindings.
 - README must document keybinding contexts, action IDs, key chord syntax, `none`, and `--config-entry`.

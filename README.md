@@ -2,7 +2,7 @@
 
 🐊 Rust TUI project navigator with Git worktree and preview support.
 
-Nerd Font is recommended for gator-family CLIs so built-in icons render correctly.
+Nerd Font is required for gator-family CLIs so built-in icons render correctly; the Homebrew formula's caveats suggest one.
 
 ## Install
 
@@ -11,6 +11,25 @@ Homebrew tap: https://github.com/Yarden-zamir/homebrew-tap
 ```sh
 brew install yarden-zamir/tap/navgator
 ```
+
+## Getting Started
+
+Run the interactive walkthrough:
+
+```sh
+navgator onboarding
+```
+
+It explains the binary/wrapper split, creates a starter config if none exists (asking which folders to index), captures the shortcut keys you actually press, and offers to append the zsh wrapper `source` line plus those bindings to `~/.zshrc`. An existing config is kept unless you explicitly choose to replace it, in which case the old file is saved as a `.bak`; an existing wrapper setup is never touched. `navgator --onboarding` is an alias.
+
+## Binary vs Shell Wrapper
+
+navgator ships as two pieces, and both matter:
+
+- The `navgator` **binary** is the whole TUI: search, previews, actions, create flows. When you pick a target it prints the selected path to stdout (or writes it to the file named by `GATOR_OUTPUT`). No process can change its parent shell's working directory, so the binary alone can never `cd` your shell.
+- The **zsh wrapper** (`navgator.zsh`) closes that gap. Sourcing it defines the shell widgets `navigate`, `navgator-create`, and `navgator-create-new-project`. Each widget runs the binary, reads the selection back through a `GATOR_OUTPUT` temp file, then performs the `cd` inside your actual shell — and closes the shell session when a `run-and-close` action asks for it.
+
+So: bind keyboard shortcuts to the wrapper widgets when you want selection to change your directory. Run the binary directly for everything else — actions, create recipes, `config-schema` — or when you only need the selected path printed. Setup for the wrapper is in [Zsh Widget](#zsh-widget) below, or let `navgator onboarding` do it.
 
 ## Run
 
@@ -67,7 +86,7 @@ Access history is user state stored under `$XDG_STATE_HOME/navgator/usage.json`,
 
 ## Zsh Widget
 
-Choose one setup path.
+This is the wrapper half described in [Binary vs Shell Wrapper](#binary-vs-shell-wrapper). `navgator onboarding` can append this setup to `~/.zshrc` for you; the manual paths follow. Choose one setup path.
 
 Homebrew manages both the binary and wrapper:
 
@@ -90,6 +109,7 @@ bindkey '^N' navgator-create-new-project
 
 The wrapper prefers `$NAVGATOR_BIN`, then adjacent local release and debug builds, then `navgator` on `PATH`.
 The wrapper writes selections through `GATOR_OUTPUT`; otherwise `navgator` prints the selected path to stdout.
+When sourced, the wrapper exports `NAVGATOR_ZSH_SOURCED` so tools like `navgator onboarding` can detect it without reading rc files.
 
 ## Actions
 

@@ -20,11 +20,12 @@ class Navgator < Formula
 
   def caveats
     <<~EOS
-      To activate the zsh navigator widget, add this to your .zshrc:
+      Run `navgator onboarding` for a guided setup, or add this to your .zshrc:
         source #{opt_pkgshare}/navgator.zsh
-
-      Then bind it, for example:
         bindkey '^T' navigate
+
+      navgator needs a Nerd Font to render its icons, for example:
+        brew install --cask font-jetbrains-mono-nerd-font
     EOS
   end
 
