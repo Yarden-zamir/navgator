@@ -2,11 +2,9 @@ use std::{path::Path, process::Command};
 
 // Generic process helpers live in gator; navgator keeps only the git-specific
 // command runners below.
-pub(crate) use gator::process::{
-    open_url, run_command_output, run_interactive_command, run_shell_recipe,
-};
+pub use gator::process::{open_url, run_command_output, run_interactive_command, run_shell_recipe};
 
-pub(crate) fn run_git_command_allow_empty(repo_dir: &Path, args: &[&str]) -> Option<String> {
+pub fn run_git_command_allow_empty(repo_dir: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_dir)
@@ -27,7 +25,7 @@ pub(crate) fn run_git_command_allow_empty(repo_dir: &Path, args: &[&str]) -> Opt
     )
 }
 
-pub(crate) fn git_command_succeeds(repo_dir: &Path, args: &[&str]) -> bool {
+pub fn git_command_succeeds(repo_dir: &Path, args: &[&str]) -> bool {
     Command::new("git")
         .arg("-C")
         .arg(repo_dir)

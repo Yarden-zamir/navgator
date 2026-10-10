@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(crate) fn ensure_dates_for_paths(
+pub fn ensure_dates_for_paths(
     paths: &[String],
     cache: &HashMap<String, String>,
     in_flight: &mut HashSet<String>,
@@ -27,7 +27,7 @@ pub(crate) fn ensure_dates_for_paths(
     }
 }
 
-pub(crate) fn spawn_bulk_metadata_fetch(
+pub fn spawn_bulk_metadata_fetch(
     items: &[String],
     cache: &HashMap<String, String>,
     in_flight: &mut HashSet<String>,
@@ -53,7 +53,7 @@ pub(crate) fn spawn_bulk_metadata_fetch(
     });
 }
 
-pub(crate) fn format_date_display(value: &str) -> String {
+pub fn format_date_display(value: &str) -> String {
     let mut text = value.to_string();
     if text.len() > DATE_WIDTH {
         text.truncate(DATE_WIDTH);
@@ -91,7 +91,7 @@ fn system_time_epoch(value: SystemTime) -> Option<i64> {
         .filter(|value| *value > 0)
 }
 
-pub(crate) fn format_epoch_minutes(epoch: i64) -> String {
+pub fn format_epoch_minutes(epoch: i64) -> String {
     let timestamp = epoch as libc::time_t;
     let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
     let local_time = unsafe { libc::localtime_r(&timestamp, tm.as_mut_ptr()) };

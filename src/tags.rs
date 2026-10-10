@@ -8,7 +8,7 @@ use std::{
 };
 use tui_input::Input;
 
-pub(crate) fn ensure_tags_for_paths(
+pub fn ensure_tags_for_paths(
     paths: &[String],
     cache: &HashMap<String, Vec<String>>,
     in_flight: &mut HashSet<String>,
@@ -31,7 +31,7 @@ pub(crate) fn ensure_tags_for_paths(
     }
 }
 
-pub(crate) fn spawn_bulk_tag_fetch(
+pub fn spawn_bulk_tag_fetch(
     items: &[String],
     cache: &HashMap<String, Vec<String>>,
     in_flight: &mut HashSet<String>,
@@ -57,7 +57,7 @@ pub(crate) fn spawn_bulk_tag_fetch(
     });
 }
 
-pub(crate) fn read_tags_for_path(path: &str) -> Vec<String> {
+pub fn read_tags_for_path(path: &str) -> Vec<String> {
     let dir = Path::new(path);
     let config_path = dir.join(".navgator.toml");
     if !config_path.is_file() {
@@ -70,7 +70,7 @@ pub(crate) fn read_tags_for_path(path: &str) -> Vec<String> {
     parse_tags_from_toml(&contents)
 }
 
-pub(crate) fn collect_tag_suggestions(tag_cache: &HashMap<String, Vec<String>>) -> Vec<String> {
+pub fn collect_tag_suggestions(tag_cache: &HashMap<String, Vec<String>>) -> Vec<String> {
     let mut set = HashSet::new();
     for tags in tag_cache.values() {
         for tag in tags {
@@ -85,7 +85,7 @@ pub(crate) fn collect_tag_suggestions(tag_cache: &HashMap<String, Vec<String>>) 
     list
 }
 
-pub(crate) fn commit_tag_input(input: &mut Input, tags: &mut Vec<String>, suggestions: &[String]) {
+pub fn commit_tag_input(input: &mut Input, tags: &mut Vec<String>, suggestions: &[String]) {
     let raw = input.value().trim();
     if raw.is_empty() {
         return;
@@ -104,7 +104,7 @@ pub(crate) fn commit_tag_input(input: &mut Input, tags: &mut Vec<String>, sugges
     input.reset();
 }
 
-pub(crate) fn save_tags_for_path(path: &str, tags: &[String]) -> AppResult<()> {
+pub fn save_tags_for_path(path: &str, tags: &[String]) -> AppResult<()> {
     let dir = Path::new(path);
     let config_path = dir.join(".navgator.toml");
     let contents = if config_path.exists() {

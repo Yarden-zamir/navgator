@@ -702,7 +702,7 @@ impl ConfigTheme {
     }
 }
 
-pub(crate) fn config_schema_json() -> AppResult<String> {
+pub fn config_schema_json() -> AppResult<String> {
     gator::config::schema_json::<ConfigFile>()
 }
 
@@ -712,7 +712,7 @@ impl gator::config::AppConfig for ConfigFile {
     }
 }
 
-pub(crate) fn load_config(config_entries: &[String]) -> AppResult<LoadedConfig> {
+pub fn load_config(config_entries: &[String]) -> AppResult<LoadedConfig> {
     let default_contents = default_config_contents();
     navgator_config_loader(&default_contents).load(
         config_entries,
@@ -733,11 +733,11 @@ fn navgator_config_loader(default_contents: &str) -> gator::config::ConfigLoader
     }
 }
 
-pub(crate) fn config_file_paths(home: &Path) -> Vec<PathBuf> {
+pub fn config_file_paths(home: &Path) -> Vec<PathBuf> {
     navgator_config_loader("").config_paths(home)
 }
 
-pub(crate) fn default_user_config_path(home: &Path) -> PathBuf {
+pub fn default_user_config_path(home: &Path) -> PathBuf {
     navgator_config_loader("").default_config_path(home)
 }
 
@@ -1074,7 +1074,7 @@ fn legacy_binding_chord(key: &ActionBindingKey) -> Option<KeyChord> {
     KeyChord::parse(value).ok()
 }
 
-pub(crate) const DEFAULT_INDEX_FOLDERS: [&str; 2] = ["~/Github", "~/Projects"];
+pub const DEFAULT_INDEX_FOLDERS: [&str; 2] = ["~/Github", "~/Projects"];
 
 fn default_config_contents() -> String {
     let folders: Vec<String> = DEFAULT_INDEX_FOLDERS
@@ -1084,7 +1084,7 @@ fn default_config_contents() -> String {
     starter_config_contents(&folders)
 }
 
-pub(crate) fn starter_config_contents(index_folders: &[String]) -> String {
+pub fn starter_config_contents(index_folders: &[String]) -> String {
     let actions = default_actions_config_contents();
     let create = default_create_config_contents();
     let keybindings = default_keybindings_config_contents();

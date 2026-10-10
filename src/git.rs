@@ -8,12 +8,12 @@ use std::{
 };
 
 #[derive(Clone)]
-pub(crate) struct RemoteBranchSummary {
-    pub(crate) age: String,
-    pub(crate) author: String,
+pub struct RemoteBranchSummary {
+    pub age: String,
+    pub author: String,
 }
 
-pub(crate) fn git_command_dir_for_path(path: &Path) -> Option<PathBuf> {
+pub fn git_command_dir_for_path(path: &Path) -> Option<PathBuf> {
     let dir = if path.is_dir() {
         path.to_path_buf()
     } else {
@@ -32,19 +32,19 @@ pub(crate) fn git_command_dir_for_path(path: &Path) -> Option<PathBuf> {
     Some(dir)
 }
 
-pub(crate) fn git_is_inside_work_tree(repo_dir: &Path) -> bool {
+pub fn git_is_inside_work_tree(repo_dir: &Path) -> bool {
     run_git_command_allow_empty(repo_dir, &["rev-parse", "--is-inside-work-tree"])
         .map(|value| value.trim() == "true")
         .unwrap_or(false)
 }
 
-pub(crate) fn git_is_bare_repository(repo_dir: &Path) -> bool {
+pub fn git_is_bare_repository(repo_dir: &Path) -> bool {
     run_git_command_allow_empty(repo_dir, &["rev-parse", "--is-bare-repository"])
         .map(|value| value.trim() == "true")
         .unwrap_or(false)
 }
 
-pub(crate) fn git_worktrees_for_path(path: &Path) -> Vec<GitWorktree> {
+pub fn git_worktrees_for_path(path: &Path) -> Vec<GitWorktree> {
     let Some(repo_dir) = git_command_dir_for_path(path) else {
         return Vec::new();
     };
@@ -55,13 +55,13 @@ pub(crate) fn git_worktrees_for_path(path: &Path) -> Vec<GitWorktree> {
     parse_git_worktree_list(&output)
 }
 
-pub(crate) fn git_worktree_root_for_path(path: &Path) -> Option<String> {
+pub fn git_worktree_root_for_path(path: &Path) -> Option<String> {
     run_git_command_allow_empty(path, &["rev-parse", "--show-toplevel"])
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) fn git_default_branch_for_path(path: &Path) -> Option<String> {
+pub fn git_default_branch_for_path(path: &Path) -> Option<String> {
     let repo_dir = git_command_dir_for_path(path)?;
     let output = run_git_command_allow_empty(
         &repo_dir,
@@ -74,7 +74,7 @@ pub(crate) fn git_default_branch_for_path(path: &Path) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(crate) fn selectable_worktree_path_for_project(path: &Path) -> Option<String> {
+pub fn selectable_worktree_path_for_project(path: &Path) -> Option<String> {
     let worktrees = git_worktrees_for_path(path)
         .into_iter()
         .filter(|worktree| !worktree.bare)
@@ -104,7 +104,7 @@ pub(crate) fn selectable_worktree_path_for_project(path: &Path) -> Option<String
         .map(|worktree| worktree.path.clone())
 }
 
-pub(crate) fn dot_bare_for_path(path: &Path) -> Option<(PathBuf, PathBuf)> {
+pub fn dot_bare_for_path(path: &Path) -> Option<(PathBuf, PathBuf)> {
     if path.is_dir()
         && path.file_name().and_then(|name| name.to_str()) == Some(".bare")
         && git_is_bare_repository(path)
@@ -128,7 +128,7 @@ pub(crate) fn dot_bare_for_path(path: &Path) -> Option<(PathBuf, PathBuf)> {
     }
 }
 
-pub(crate) fn fetch_remote_branch(bare: &Path, remote_branch: &str) -> Result<(), String> {
+pub fn fetch_remote_branch(bare: &Path, remote_branch: &str) -> Result<(), String> {
     let branch = local_branch_for_remote(remote_branch);
     let output = Command::new("git")
         .arg("--git-dir")
@@ -151,7 +151,7 @@ pub(crate) fn fetch_remote_branch(bare: &Path, remote_branch: &str) -> Result<()
     }
 }
 
-pub(crate) fn ls_remote_heads(bare: &Path) -> Result<Vec<String>, String> {
+pub fn ls_remote_heads(bare: &Path) -> Result<Vec<String>, String> {
     let output = Command::new("git")
         .arg("--git-dir")
         .arg(bare)
@@ -178,7 +178,7 @@ pub(crate) fn ls_remote_heads(bare: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
-pub(crate) fn local_remote_branches_for_bare(bare: &Path) -> Vec<String> {
+pub fn local_remote_branches_for_bare(bare: &Path) -> Vec<String> {
     let Some(output) = git_stdout_path(
         bare,
         &["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
@@ -193,9 +193,7 @@ pub(crate) fn local_remote_branches_for_bare(bare: &Path) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn remote_branch_summaries_for_bare(
-    bare: &Path,
-) -> HashMap<String, RemoteBranchSummary> {
+pub fn remote_branch_summaries_for_bare(bare: &Path) -> HashMap<String, RemoteBranchSummary> {
     let Some(output) = git_stdout_path(
         bare,
         &[
@@ -235,7 +233,7 @@ pub(crate) fn remote_branch_summaries_for_bare(
     summaries
 }
 
-pub(crate) fn add_worktree_for_remote_with_progress(
+pub fn add_worktree_for_remote_with_progress(
     bare: &Path,
     container: &Path,
     remote_branch: &str,
@@ -281,7 +279,7 @@ pub(crate) fn add_worktree_for_remote_with_progress(
     Ok(target.to_string_lossy().to_string())
 }
 
-pub(crate) fn checkout_remote_branch_with_progress(
+pub fn checkout_remote_branch_with_progress(
     bare: &Path,
     remote_branch: &str,
     mut progress: impl FnMut(String),
@@ -336,7 +334,7 @@ fn prepare_remote_branch_with_progress(
     Ok(branch)
 }
 
-pub(crate) fn remove_worktree_safely_with_progress(
+pub fn remove_worktree_safely_with_progress(
     path: &Path,
     mut progress: impl FnMut(String),
 ) -> Result<String, String> {
@@ -408,16 +406,12 @@ pub(crate) fn remove_worktree_safely_with_progress(
     Ok(path.to_string_lossy().to_string())
 }
 
-pub(crate) fn remote_branch_target_path(
-    bare: &Path,
-    container: &Path,
-    remote_branch: &str,
-) -> PathBuf {
+pub fn remote_branch_target_path(bare: &Path, container: &Path, remote_branch: &str) -> PathBuf {
     let branch = local_branch_for_remote(remote_branch);
     container.join(dir_name_for_branch(bare, container, &branch))
 }
 
-pub(crate) fn remote_branch_target_paths(
+pub fn remote_branch_target_paths(
     bare: &Path,
     container: &Path,
     remote_branches: &[String],
@@ -440,14 +434,14 @@ pub(crate) fn remote_branch_target_paths(
         .collect()
 }
 
-pub(crate) fn local_branch_for_remote(remote_branch: &str) -> String {
+pub fn local_branch_for_remote(remote_branch: &str) -> String {
     remote_branch
         .split_once('/')
         .map(|(_, branch)| branch.to_string())
         .unwrap_or_else(|| remote_branch.to_string())
 }
 
-pub(crate) fn parse_git_worktree_list(output: &str) -> Vec<GitWorktree> {
+pub fn parse_git_worktree_list(output: &str) -> Vec<GitWorktree> {
     let mut worktrees = Vec::new();
     let mut current: Option<GitWorktree> = None;
 
@@ -696,7 +690,7 @@ fn git_stdout_path(bare: &Path, args: &[&str]) -> Option<String> {
     }
 }
 
-pub(crate) fn git_worktree_label(worktree: &GitWorktree, shorten_after_slash: bool) -> String {
+pub fn git_worktree_label(worktree: &GitWorktree, shorten_after_slash: bool) -> String {
     if let Some(branch) = worktree.branch.as_ref() {
         if !branch.trim().is_empty() {
             return worktree_tab_label(branch, shorten_after_slash);
@@ -713,7 +707,7 @@ pub(crate) fn git_worktree_label(worktree: &GitWorktree, shorten_after_slash: bo
     }
 }
 
-pub(crate) fn worktree_tab_label(label: &str, shorten_after_slash: bool) -> String {
+pub fn worktree_tab_label(label: &str, shorten_after_slash: bool) -> String {
     if !shorten_after_slash {
         return label.to_string();
     }

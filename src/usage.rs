@@ -25,18 +25,18 @@ struct AccessEntry {
     last_accessed_epoch: i64,
 }
 
-pub(crate) struct AccessHistory {
+pub struct AccessHistory {
     state: AccessState,
 }
 
 impl AccessHistory {
-    pub(crate) fn load() -> io::Result<Self> {
+    pub fn load() -> io::Result<Self> {
         Ok(Self {
             state: load_state(&state_file_path()?)?,
         })
     }
 
-    pub(crate) fn apply_to_sort_meta(
+    pub fn apply_to_sort_meta(
         &self,
         entries: &[NavigateEntry],
         meta_cache: &mut HashMap<String, SortMeta>,
@@ -55,7 +55,7 @@ impl AccessHistory {
     }
 }
 
-pub(crate) fn record_access(path: &str) -> io::Result<()> {
+pub fn record_access(path: &str) -> io::Result<()> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| io::Error::other(format!("System clock is before Unix epoch: {error}")))?

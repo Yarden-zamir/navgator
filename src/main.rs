@@ -18,22 +18,21 @@ use std::{
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::{Input, InputRequest};
 
-mod commands;
 mod compositor;
-mod config;
-mod content;
-mod git;
-mod github;
-mod metadata;
-mod model;
 mod onboarding;
-mod path_identity;
-mod provider_runtime;
-mod results;
-mod search;
-mod tags;
 mod ui;
-mod usage;
+
+use navgator::actions::{
+    action_file_condition_matches, filtered_action_indexes, resolve_action, ResolvedAction,
+    RunnableAction,
+};
+use navgator::create::{
+    self, create_recipe_index, filtered_create_indexes, initial_prompt_values,
+    path_suggestions_for_input, refill_dependent_defaults, validate_create_values, PathSuggestion,
+};
+use navgator::{
+    commands, config, content, git, github, metadata, model, results, search, tags, usage,
+};
 
 use compositor::{CurrentCompositor, FocusChange, NavigationCompositor};
 use config::config_schema_json;
@@ -47,18 +46,21 @@ use github::ensure_github_readme_for_preview;
 use metadata::{ensure_dates_for_paths, spawn_bulk_metadata_fetch};
 use model::keybindings::{BindingContext, BindingTarget, CoreAction, Keymap};
 use model::{
-    ActionDefinition, ActionKind, ActionSettings, AppResult, BranchSelectBehavior, BranchSettings,
+    ActionDefinition, ActionSettings, AppResult, BranchSelectBehavior, BranchSettings,
     CreateDefinition, CreatePromptKind, CreateSettings, Focus, GitResult, GithubReadmeResult,
     HelpColors, HelpContext, MetaResult, NavigateEntry, NavigateEntryKind, PreviewColors,
     PreviewData, PreviewResult, PreviewSettings, RemoteSettings, RemoteToggleState, ResultUpdate,
-    SidePanelRender, SortMeta, SortMode, SortSettings, TagResult, ThemeColors, VisibleListArgs,
+    SidePanelRender, SortMeta, SortSettings, TagResult, ThemeColors, VisibleListArgs,
     DATE_PLACEHOLDER,
 };
 use results::{
     build_items_with_config_entries, spawn_remote_branch_result_provider,
     spawn_worktree_result_provider, REMOTE_BRANCH_PROVIDER_PREFIX,
 };
-use search::{filter_and_sort, index_for_entry_id, parse_query_tokens};
+use search::{
+    filter_and_sort_visible, index_for_entry_id, is_remote_branch_entry, parse_query_tokens,
+    visible_entry_count, ResultSortContext,
+};
 use tags::{
     collect_tag_suggestions, commit_tag_input, ensure_tags_for_paths, read_tags_for_path,
     save_tags_for_path, spawn_bulk_tag_fetch,
@@ -333,7 +335,7 @@ enum NavigateOutcome {
         close_session: bool,
     },
     RunAction {
-        action: ResolvedAction,
+        action: RunnableAction,
         target_path: Option<String>,
         close_session: bool,
     },
@@ -362,22 +364,6 @@ struct SelectListArgs {
     theme_colors: ThemeColors,
     keymap: Keymap,
     initial_launch: InitialLaunch,
-}
-
-#[derive(Clone, Copy)]
-struct ResultSortContext<'a> {
-    show_remote_branches: bool,
-    sort_settings: &'a SortSettings,
-    current_project_path: Option<&'a str>,
-}
-
-enum ResolvedAction {
-    Command {
-        command: String,
-        args: Vec<String>,
-        current_dir: Option<PathBuf>,
-    },
-    OpenUrl(String),
 }
 
 struct ActionPicker {
@@ -426,13 +412,6 @@ enum CreateFormFocus {
     Completions,
 }
 
-#[derive(Clone)]
-struct PathSuggestion {
-    display: String,
-    value: String,
-    is_dir: bool,
-}
-
 enum CreateModal {
     Picker(CreatePicker),
     Form(CreateForm),
@@ -454,14 +433,14 @@ struct CreateFormRender<'a> {
     colors: ActionPickerColors,
 }
 
-fn run_action(action: ResolvedAction) -> AppResult<()> {
+fn run_action(action: RunnableAction) -> AppResult<()> {
     let result = match action {
-        ResolvedAction::Command {
+        RunnableAction::Command {
             command,
             args,
             current_dir,
         } => commands::run_interactive_command(&command, &args, current_dir.as_deref()),
-        ResolvedAction::OpenUrl(url) => commands::open_url(&url),
+        RunnableAction::OpenUrl(url) => commands::open_url(&url),
     };
     result.map_err(Into::into)
 }
@@ -513,52 +492,17 @@ fn resolve_picker_action(
     path: Option<&str>,
     close_session: bool,
 ) -> Option<NavigateOutcome> {
-    let action = action?;
-    match &action.kind {
-        ActionKind::Navigate => path.map(|value| NavigateOutcome::Navigate {
-            path: value.to_string(),
+    Some(match resolve_action(action?, path)? {
+        ResolvedAction::Navigate(path) => NavigateOutcome::Navigate {
+            path,
             close_session,
-        }),
-        ActionKind::Command {
-            command,
-            args,
-            current_dir,
-        } => {
-            let github_url = github_url_for_action(path);
-            let command = expand_action_value(command, path, github_url.as_deref())?;
-            let args = args
-                .iter()
-                .map(|arg| expand_action_value(arg, path, github_url.as_deref()))
-                .collect::<Option<Vec<String>>>()?;
-            let current_dir_value = current_dir
-                .as_ref()
-                .map(|dir| expand_action_value(dir, path, github_url.as_deref()))
-                .unwrap_or(Some(String::new()))?;
-            let current_dir = if current_dir_value.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(current_dir_value))
-            };
-            Some(NavigateOutcome::RunAction {
-                action: ResolvedAction::Command {
-                    command,
-                    args,
-                    current_dir,
-                },
-                target_path: path.map(str::to_string),
-                close_session,
-            })
-        }
-        ActionKind::OpenUrl { url } => {
-            let github_url = github_url_for_action(path);
-            let url = expand_action_value(url, path, github_url.as_deref())?;
-            Some(NavigateOutcome::RunAction {
-                action: ResolvedAction::OpenUrl(url),
-                target_path: path.map(str::to_string),
-                close_session,
-            })
-        }
-    }
+        },
+        ResolvedAction::Run(action) => NavigateOutcome::RunAction {
+            action,
+            target_path: path.map(str::to_string),
+            close_session,
+        },
+    })
 }
 
 fn target_action_from_binding(target: &BindingTarget) -> Option<TargetAction> {
@@ -610,32 +554,6 @@ fn dispatch_target_action(
     }
 }
 
-fn github_url_for_action(path: Option<&str>) -> Option<String> {
-    github::github_url_for_path(Path::new(path?))
-}
-
-fn expand_action_value(
-    value: &str,
-    path: Option<&str>,
-    github_url: Option<&str>,
-) -> Option<String> {
-    if value.contains("{path}") && path.is_none() {
-        return None;
-    }
-    if value.contains("{github_url}") && github_url.is_none() {
-        return None;
-    }
-
-    let mut expanded = value.to_string();
-    if let Some(path) = path {
-        expanded = expanded.replace("{path}", path);
-    }
-    if let Some(github_url) = github_url {
-        expanded = expanded.replace("{github_url}", github_url);
-    }
-    Some(expanded)
-}
-
 fn next_picker_index(selected: usize, len: usize) -> usize {
     if len == 0 {
         0
@@ -652,73 +570,6 @@ fn previous_picker_index(selected: usize, len: usize) -> usize {
     } else {
         selected - 1
     }
-}
-
-fn filtered_action_indexes(
-    actions: &[ActionDefinition],
-    picker: Option<&[String]>,
-    query: &str,
-    path: Option<&str>,
-) -> Vec<usize> {
-    let query = query.trim().to_lowercase();
-    let indexes = picker.map_or_else(
-        || (0..actions.len()).collect::<Vec<_>>(),
-        |ids| {
-            ids.iter()
-                .filter_map(|id| {
-                    actions
-                        .iter()
-                        .position(|action| action.id.as_deref() == Some(id.as_str()))
-                })
-                .collect()
-        },
-    );
-    indexes
-        .into_iter()
-        .filter(|index| action_file_condition_matches(&actions[*index], path))
-        .filter(|index| {
-            let action = &actions[*index];
-            query.is_empty()
-                || action.label.to_lowercase().contains(&query)
-                || action
-                    .icon
-                    .as_deref()
-                    .is_some_and(|icon| icon.to_lowercase().contains(&query))
-        })
-        .collect()
-}
-
-fn filtered_create_indexes(items: &[CreateDefinition], query: &str) -> Vec<usize> {
-    let query = query.trim().to_lowercase();
-    items
-        .iter()
-        .enumerate()
-        .filter(|(_, item)| {
-            query.is_empty()
-                || item.label.to_lowercase().contains(&query)
-                || item
-                    .icon
-                    .as_deref()
-                    .is_some_and(|icon| icon.to_lowercase().contains(&query))
-        })
-        .map(|(index, _)| index)
-        .collect()
-}
-
-fn action_file_condition_matches(action: &ActionDefinition, path: Option<&str>) -> bool {
-    let Some(condition) = action.file_condition.as_deref() else {
-        return true;
-    };
-    let Some(path) = path else {
-        return false;
-    };
-    let condition_path = Path::new(condition);
-    let target = if condition_path.is_absolute() {
-        condition_path.to_path_buf()
-    } else {
-        Path::new(path).join(condition_path)
-    };
-    target.exists()
 }
 
 fn clamp_picker_selection(picker: &mut ActionPicker, visible_len: usize) {
@@ -778,31 +629,6 @@ fn initial_create_modal(
     }
 }
 
-fn create_recipe_index(items: &[CreateDefinition], selector: &str) -> Option<usize> {
-    let normalized_selector = create_recipe_selector(selector);
-    items.iter().position(|item| {
-        item.label.eq_ignore_ascii_case(selector)
-            || create_recipe_selector(&item.label) == normalized_selector
-    })
-}
-
-fn create_recipe_selector(value: &str) -> String {
-    let mut selector = String::new();
-    let mut pending_dash = false;
-    for ch in value.chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_alphanumeric() {
-            if pending_dash && !selector.is_empty() {
-                selector.push('-');
-            }
-            selector.push(ch);
-            pending_dash = false;
-        } else {
-            pending_dash = true;
-        }
-    }
-    selector
-}
-
 fn create_modal_fixed_path(modal: Option<&CreateModal>) -> Option<String> {
     match modal {
         Some(CreateModal::Picker(picker)) => picker.fixed_path.clone(),
@@ -817,22 +643,9 @@ fn create_form_for_item(
     selected_path: Option<&str>,
     fixed_path: Option<String>,
 ) -> CreateForm {
-    let mut values = Vec::new();
-    let inputs = item
-        .prompts
-        .iter()
-        .map(|prompt| {
-            let value = prompt
-                .default
-                .as_deref()
-                .map(|default| expand_create_value(default, selected_path, &values))
-                .unwrap_or_default();
-            values.push((
-                prompt.name.clone(),
-                normalized_prompt_value(prompt.kind, &value),
-            ));
-            Input::new(value)
-        })
+    let inputs = initial_prompt_values(item, selected_path)
+        .into_iter()
+        .map(Input::new)
         .collect::<Vec<Input>>();
     let path_suggestions = item
         .prompts
@@ -910,105 +723,43 @@ fn update_dependent_create_defaults(
     item: &CreateDefinition,
     selected_path: Option<&str>,
 ) {
-    let mut values = Vec::new();
-    for (index, prompt) in item.prompts.iter().enumerate() {
-        let current = form
-            .inputs
-            .get(index)
-            .map(Input::value)
-            .unwrap_or_default()
-            .to_string();
-        if index > form.active_prompt && current.trim().is_empty() {
-            if let Some(default) = prompt.default.as_deref() {
-                let value = expand_create_value(default, selected_path, &values);
-                if let Some(input) = form.inputs.get_mut(index) {
-                    *input = Input::new(value.clone());
-                }
-                values.push((
-                    prompt.name.clone(),
-                    normalized_prompt_value(prompt.kind, &value),
-                ));
-                continue;
-            }
+    let current = form_input_values(form);
+    let refilled = refill_dependent_defaults(item, selected_path, &current, form.active_prompt);
+    for ((input, before), after) in form.inputs.iter_mut().zip(&current).zip(refilled) {
+        if *before != after {
+            *input = Input::new(after);
         }
-        values.push((
-            prompt.name.clone(),
-            normalized_prompt_value(prompt.kind, &current),
-        ));
     }
     update_create_path_suggestions(form, item);
+}
+
+fn form_input_values(form: &CreateForm) -> Vec<String> {
+    form.inputs
+        .iter()
+        .map(|input| input.value().to_string())
+        .collect()
 }
 
 fn collect_create_form_values(
     form: &mut CreateForm,
     item: &CreateDefinition,
 ) -> Option<Vec<(String, String)>> {
-    let mut values = Vec::new();
-    for (index, prompt) in item.prompts.iter().enumerate() {
-        let raw_value = form
-            .inputs
-            .get(index)
-            .map(Input::value)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if prompt.required && raw_value.is_empty() {
-            form.active_prompt = index;
-            form.error = Some(format!("{} is required", prompt.label));
-            update_create_path_suggestions(form, item);
-            return None;
+    match validate_create_values(item, &form_input_values(form)) {
+        Ok(values) => {
+            form.error = None;
+            Some(values)
         }
-        values.push((
-            prompt.name.clone(),
-            normalized_prompt_value(prompt.kind, &raw_value),
-        ));
-    }
-    form.error = None;
-    Some(values)
-}
-
-fn normalized_prompt_value(kind: CreatePromptKind, value: &str) -> String {
-    if kind == CreatePromptKind::Path {
-        expand_home_prefix(value.trim())
-    } else {
-        value.trim().to_string()
+        Err(missing) => {
+            form.active_prompt = missing.prompt_index;
+            form.error = Some(missing.message);
+            update_create_path_suggestions(form, item);
+            None
+        }
     }
 }
 
 fn create_form_input_row(active_prompt: usize) -> usize {
     2 + active_prompt.saturating_mul(2)
-}
-
-fn expand_create_value(
-    value: &str,
-    selected_path: Option<&str>,
-    values: &[(String, String)],
-) -> String {
-    let mut expanded = value.to_string();
-    if let Some(path) = selected_path {
-        expanded = expanded.replace("{path}", path);
-    }
-    for (name, prompt_value) in values {
-        expanded = expanded.replace(&format!("{{{name}}}"), prompt_value);
-    }
-    expand_home_prefix(&expanded)
-}
-
-fn create_env_values(
-    selected_path: Option<&str>,
-    values: &[(String, String)],
-) -> Vec<(String, String)> {
-    let mut envs = Vec::new();
-    if let Some(path) = selected_path {
-        envs.push(("NAVGATOR_SELECTED_PATH".to_string(), path.to_string()));
-    }
-    for (name, value) in values {
-        envs.push((
-            format!("NAVGATOR_CREATE_{}", name.to_ascii_uppercase()),
-            value.clone(),
-        ));
-    }
-    envs
 }
 
 fn run_create_recipe(
@@ -1018,121 +769,15 @@ fn run_create_recipe(
     tx: mpsc::Sender<CreateProgress>,
 ) {
     thread::spawn(move || {
-        let selected_path = selected_path.as_deref();
-        let success_path = expand_create_value(&item.success_path, selected_path, &values);
-        if success_path.trim().is_empty() {
-            let _ = tx.send(CreateProgress::Error(
-                "success_path expanded to an empty value".to_string(),
-            ));
-            return;
-        }
-        let current_dir = item
-            .current_dir
-            .as_deref()
-            .map(|value| PathBuf::from(expand_create_value(value, selected_path, &values)));
-        let envs = create_env_values(selected_path, &values);
-        let _ = tx.send(CreateProgress::Message(format!("Running {}", item.label)));
-        match commands::run_shell_recipe(&item.shell, current_dir.as_deref(), &envs) {
-            Ok(result) => {
-                if !result.stdout.is_empty() {
-                    let _ = tx.send(CreateProgress::Message(result.stdout));
-                }
-                let success = PathBuf::from(&success_path);
-                if !success.exists() {
-                    let _ = tx.send(CreateProgress::Error(format!(
-                        "success_path does not exist: {}",
-                        success.display()
-                    )));
-                    return;
-                }
-                let _ = tx.send(CreateProgress::Select(
-                    success.to_string_lossy().to_string(),
-                ));
-            }
-            Err(message) => {
-                let _ = tx.send(CreateProgress::Error(message));
-            }
-        }
+        let result =
+            create::run_create_recipe(&item, selected_path.as_deref(), &values, |message| {
+                let _ = tx.send(CreateProgress::Message(message));
+            });
+        let _ = tx.send(match result {
+            Ok(path) => CreateProgress::Select(path),
+            Err(message) => CreateProgress::Error(message),
+        });
     });
-}
-
-fn path_suggestions_for_input(input: &str) -> Vec<PathSuggestion> {
-    let expanded = expand_home_prefix(input);
-    let expanded_path = Path::new(&expanded);
-    let input_ends_with_separator =
-        input.ends_with('/') || input.ends_with(std::path::MAIN_SEPARATOR);
-    let (parent, partial) = if input_ends_with_separator {
-        (expanded_path, "")
-    } else {
-        (
-            expanded_path.parent().unwrap_or_else(|| Path::new(".")),
-            expanded_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(""),
-        )
-    };
-    let Ok(entries) = fs::read_dir(parent) else {
-        return Vec::new();
-    };
-    let mut suggestions = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !partial.is_empty() && !name.starts_with(partial) {
-                return None;
-            }
-            let path = entry.path();
-            let is_dir = path.is_dir();
-            let mut value = path.to_string_lossy().to_string();
-            if is_dir && !value.ends_with(std::path::MAIN_SEPARATOR) {
-                value.push(std::path::MAIN_SEPARATOR);
-            }
-            Some(PathSuggestion {
-                display: if is_dir { format!("{name}/") } else { name },
-                value: display_path_for_input(&value),
-                is_dir,
-            })
-        })
-        .collect::<Vec<PathSuggestion>>();
-    suggestions.sort_by(|left, right| {
-        right
-            .is_dir
-            .cmp(&left.is_dir)
-            .then(left.display.cmp(&right.display))
-    });
-    suggestions.truncate(8);
-    suggestions
-}
-
-fn expand_home_prefix(value: &str) -> String {
-    if value == "~" {
-        return env::var("HOME").unwrap_or_else(|_| value.to_string());
-    }
-    if let Some(rest) = value.strip_prefix("~/") {
-        if let Ok(home) = env::var("HOME") {
-            return Path::new(&home).join(rest).to_string_lossy().to_string();
-        }
-    }
-    value.to_string()
-}
-
-fn display_path_for_input(value: &str) -> String {
-    let Ok(home) = env::var("HOME") else {
-        return value.to_string();
-    };
-    if value == home {
-        return "~".to_string();
-    }
-    let home_prefix = format!(
-        "{}{}",
-        home.trim_end_matches(std::path::MAIN_SEPARATOR),
-        std::path::MAIN_SEPARATOR
-    );
-    if let Some(rest) = value.strip_prefix(&home_prefix) {
-        return format!("~/{rest}");
-    }
-    value.to_string()
 }
 
 fn action_path_entry(path: &Path) -> NavigateEntry {
@@ -2905,75 +2550,6 @@ fn insert_paste(input: &mut Input, value: &str) {
     }
 }
 
-fn filter_and_sort_visible(
-    entries: &[NavigateEntry],
-    query: &str,
-    sort_mode: SortMode,
-    meta_cache: &HashMap<String, SortMeta>,
-    tag_cache: &HashMap<String, Vec<String>>,
-    context: ResultSortContext<'_>,
-) -> Vec<usize> {
-    let ignored_paths = context.sort_settings.ignored_paths(sort_mode);
-    let mut indices: Vec<usize> = filter_and_sort(
-        entries,
-        query,
-        sort_mode,
-        meta_cache,
-        tag_cache,
-        ignored_paths,
-    )
-    .into_iter()
-    .filter(|index| context.show_remote_branches || !is_remote_branch_entry(&entries[*index]))
-    .collect();
-    if query.trim().is_empty() {
-        let pinned_path = context
-            .current_project_path
-            .filter(|_| context.sort_settings.pin_current_project);
-        pin_current_project(&mut indices, entries, pinned_path, ignored_paths);
-    }
-    indices
-}
-
-fn pin_current_project(
-    indices: &mut Vec<usize>,
-    entries: &[NavigateEntry],
-    pinned_path: Option<&str>,
-    ignored_paths: Option<&HashSet<String>>,
-) {
-    let Some(pinned_path) = pinned_path else {
-        return;
-    };
-    let Some(position) = indices.iter().position(|index| {
-        let entry = &entries[*index];
-        let ignored = ignored_paths
-            .map(|paths| paths.contains(&entry.metadata_path))
-            .unwrap_or(false);
-        !ignored && entry_matches_path(entry, pinned_path)
-    }) else {
-        return;
-    };
-    let index = indices.remove(position);
-    indices.insert(0, index);
-}
-
-fn entry_matches_path(entry: &NavigateEntry, path: &str) -> bool {
-    entry.selection_path == path
-        || entry.metadata_path == path
-        || entry.preview_root_path == path
-        || entry.preferred_preview_path.as_deref() == Some(path)
-}
-
-fn visible_entry_count(entries: &[NavigateEntry], show_remote_branches: bool) -> usize {
-    entries
-        .iter()
-        .filter(|entry| show_remote_branches || !is_remote_branch_entry(entry))
-        .count()
-}
-
-fn is_remote_branch_entry(entry: &NavigateEntry) -> bool {
-    matches!(entry.kind, NavigateEntryKind::RemoteBranch { .. })
-}
-
 fn remote_toggle_state(
     show_remote_branches: bool,
     remote_fetching: bool,
@@ -3934,7 +3510,7 @@ fn all_metadata_paths(entries: &[NavigateEntry]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::default_preview_settings;
+    use crate::model::{default_preview_settings, ActionKind, SortMode};
     use ratatui::text::Line;
 
     #[test]
@@ -4020,7 +3596,7 @@ mod tests {
                 &[action],
             ),
             Ok(TargetActionDispatch::Exit(NavigateOutcome::RunAction {
-                action: ResolvedAction::Command {
+                action: RunnableAction::Command {
                     command,
                     args,
                     current_dir: Some(current_dir),
@@ -4049,7 +3625,7 @@ mod tests {
                 &[open_url],
             ),
             Ok(TargetActionDispatch::Exit(NavigateOutcome::RunAction {
-                action: ResolvedAction::OpenUrl(url),
+                action: RunnableAction::OpenUrl(url),
                 target_path: Some(target_path),
                 close_session: false,
             })) if url == "https://example.com" && target_path == "/repos/project"
@@ -4258,15 +3834,6 @@ mod tests {
     }
 
     #[test]
-    fn expands_action_path_placeholders() {
-        assert_eq!(
-            expand_action_value("cd {path}", Some("/repos/project"), None),
-            Some("cd /repos/project".to_string())
-        );
-        assert_eq!(expand_action_value("cd {path}", None, None), None);
-    }
-
-    #[test]
     fn picker_index_wraps() {
         assert_eq!(next_picker_index(2, 3), 0);
         assert_eq!(previous_picker_index(0, 3), 2);
@@ -4342,41 +3909,6 @@ mod tests {
                 selector: "new-branch-worktree".to_string(),
                 path,
             }
-        );
-    }
-
-    #[test]
-    fn create_recipe_selector_matches_labels() {
-        let items = model::default_create_definitions();
-
-        assert_eq!(create_recipe_selector("New project"), "new-project");
-        assert_eq!(create_recipe_index(&items, "new-project"), Some(0));
-        assert_eq!(
-            create_recipe_index(&items, "New branch + worktree"),
-            Some(1)
-        );
-    }
-
-    #[test]
-    fn expands_create_placeholders_and_home_prefix() {
-        let old_home = env::var("HOME").ok();
-        env::set_var("HOME", "/Users/example");
-
-        let expanded = expand_create_value(
-            "~/Github/{name}",
-            Some("selected"),
-            &[("name".to_string(), "repo".to_string())],
-        );
-
-        restore_env_var("HOME", old_home);
-        assert_eq!(expanded, "/Users/example/Github/repo");
-        assert_eq!(
-            expand_create_value(
-                "/tmp/{name}/{path}",
-                Some("selected"),
-                &[("name".to_string(), "repo".to_string())],
-            ),
-            "/tmp/repo/selected"
         );
     }
 
@@ -4660,25 +4192,6 @@ mod tests {
             search::entry_match_context(&entries[0], &[], &tokens).as_deref(),
             None
         );
-    }
-
-    #[test]
-    fn ignored_current_project_is_not_pinned_above_other_results() {
-        let entries = vec![
-            test_entry("normal", "normal", "/repos/normal"),
-            test_entry("ignored", "ignored", "/repos/ignored"),
-        ];
-        let ignored_paths = HashSet::from(["/repos/ignored".to_string()]);
-        let mut indices = vec![0, 1];
-
-        pin_current_project(
-            &mut indices,
-            &entries,
-            Some("/repos/ignored"),
-            Some(&ignored_paths),
-        );
-
-        assert_eq!(indices, vec![0, 1]);
     }
 
     #[test]

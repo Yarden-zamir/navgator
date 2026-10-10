@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub(crate) fn path_key(path: &str) -> io::Result<String> {
+pub fn path_key(path: &str) -> io::Result<String> {
     let path = PathBuf::from(path);
     let absolute = if path.is_absolute() {
         path

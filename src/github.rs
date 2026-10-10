@@ -13,20 +13,36 @@ use std::{
     thread,
 };
 
-#[derive(Debug, PartialEq, Eq)]
-struct GithubRepoSummary {
-    description: Option<String>,
-    language: Option<String>,
-    default_branch: Option<String>,
-    stars: Option<u64>,
-    forks: Option<u64>,
-    open_issues: Option<u64>,
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct GithubRepoSummary {
+    pub description: Option<String>,
+    pub language: Option<String>,
+    pub default_branch: Option<String>,
+    pub stars: Option<u64>,
+    pub forks: Option<u64>,
+    pub open_issues: Option<u64>,
 }
 
-#[derive(Default)]
-struct GithubContentParts {
-    summary: Option<GithubRepoSummary>,
-    readme: Option<String>,
+/// The GitHub panel for one repository: `gh api` summary and raw README.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct GithubContentParts {
+    pub summary: Option<GithubRepoSummary>,
+    pub readme: Option<String>,
+}
+
+/// Fetch summary and README for the GitHub repo behind `path` in parallel.
+/// Blocks until both `gh` calls finish. Returns `None` for non-GitHub paths.
+pub fn github_content_for_path(path: &str) -> Option<GithubContentParts> {
+    let (repo, repo_dir) = github_repo_for_path(path)?;
+    let summary = thread::scope(|scope| {
+        let summary = scope.spawn(|| github_summary_for_repo(&repo, Some(&repo_dir)));
+        let readme = github_readme_for_repo(&repo, Some(&repo_dir));
+        GithubContentParts {
+            summary: summary.join().expect("gh summary thread panicked"),
+            readme: readme.filter(|value| !value.trim().is_empty()),
+        }
+    });
+    Some(summary)
 }
 
 enum GithubRepoPart {
@@ -34,7 +50,7 @@ enum GithubRepoPart {
     Readme(Option<String>),
 }
 
-pub(crate) fn ensure_github_readme_for_preview(
+pub fn ensure_github_readme_for_preview(
     path: &str,
     data: &PreviewData,
     github_in_flight: &mut HashSet<String>,
@@ -276,7 +292,7 @@ fn github_readme_for_repo(repo: &str, current_dir: Option<&Path>) -> Option<Stri
     run_command_output("gh", &args, current_dir)
 }
 
-pub(crate) fn github_repo_from_remote(remote: &str) -> Option<String> {
+pub fn github_repo_from_remote(remote: &str) -> Option<String> {
     let trimmed = remote.trim();
     if trimmed.is_empty() {
         return None;
@@ -291,11 +307,11 @@ pub(crate) fn github_repo_from_remote(remote: &str) -> Option<String> {
     github_repo_from_path(path)
 }
 
-pub(crate) fn github_url_from_remote(remote: &str) -> Option<String> {
+pub fn github_url_from_remote(remote: &str) -> Option<String> {
     github_repo_from_remote(remote).map(|repo| format!("https://github.com/{repo}"))
 }
 
-pub(crate) fn github_url_for_path(path: &Path) -> Option<String> {
+pub fn github_url_for_path(path: &Path) -> Option<String> {
     let repo_dir = git_command_dir_for_path(path)?;
     let remote = run_git_command_allow_empty(&repo_dir, &["remote", "get-url", "origin"])?;
     github_url_from_remote(&remote)

@@ -16,11 +16,11 @@ use ratatui::{
 };
 use std::{collections::HashSet, fs, path::Path, process::Command, sync::mpsc, thread};
 
-pub(crate) fn display_path_for_user(path: &str) -> String {
+pub fn display_path_for_user(path: &str) -> String {
     gator::text::collapse_home_env(path)
 }
 
-pub(crate) fn build_placeholder_text(
+pub fn build_placeholder_text(
     path: Option<&str>,
     accent: Color,
     muted: Color,
@@ -43,18 +43,18 @@ pub(crate) fn build_placeholder_text(
     Text::from(lines)
 }
 
-pub(crate) struct ApplyPreviewData<'a> {
-    pub(crate) tab_index: &'a mut usize,
-    pub(crate) tab_visible_index: &'a mut usize,
-    pub(crate) tab_count: &'a mut usize,
-    pub(crate) tab_labels: &'a mut Vec<String>,
-    pub(crate) preview_text: &'a mut Text<'static>,
-    pub(crate) detail_tabs: &'a mut Vec<DetailTab>,
-    pub(crate) detail_tab_index: &'a mut usize,
-    pub(crate) worktree_filter: &'a str,
+pub struct ApplyPreviewData<'a> {
+    pub tab_index: &'a mut usize,
+    pub tab_visible_index: &'a mut usize,
+    pub tab_count: &'a mut usize,
+    pub tab_labels: &'a mut Vec<String>,
+    pub preview_text: &'a mut Text<'static>,
+    pub detail_tabs: &'a mut Vec<DetailTab>,
+    pub detail_tab_index: &'a mut usize,
+    pub worktree_filter: &'a str,
 }
 
-pub(crate) fn apply_preview_data(data: &PreviewData, view: ApplyPreviewData<'_>) {
+pub fn apply_preview_data(data: &PreviewData, view: ApplyPreviewData<'_>) {
     if data.previews.is_empty() {
         return;
     }
@@ -84,7 +84,7 @@ pub(crate) fn apply_preview_data(data: &PreviewData, view: ApplyPreviewData<'_>)
     *view.detail_tab_index = (*view.detail_tab_index).min(view.detail_tabs.len().saturating_sub(1));
 }
 
-pub(crate) fn preview_tab_visible_indexes(data: &PreviewData, worktree_filter: &str) -> Vec<usize> {
+pub fn preview_tab_visible_indexes(data: &PreviewData, worktree_filter: &str) -> Vec<usize> {
     let filter = worktree_filter.trim().to_lowercase();
     if filter.is_empty() {
         return (0..data.previews.len()).collect();
@@ -112,7 +112,7 @@ pub(crate) fn preview_tab_visible_indexes(data: &PreviewData, worktree_filter: &
     }
 }
 
-pub(crate) fn detail_tabs_for_preview(tab: &PreviewTab) -> Vec<DetailTab> {
+pub fn detail_tabs_for_preview(tab: &PreviewTab) -> Vec<DetailTab> {
     let mut tabs = Vec::new();
     if let Some(readme) = tab.github_readme.as_ref() {
         tabs.push(DetailTab {
@@ -129,7 +129,7 @@ pub(crate) fn detail_tabs_for_preview(tab: &PreviewTab) -> Vec<DetailTab> {
     tabs
 }
 
-pub(crate) fn apply_git_result(
+pub fn apply_git_result(
     data: &mut PreviewData,
     tab_index: usize,
     git: Option<Text<'static>>,
@@ -143,7 +143,7 @@ pub(crate) fn apply_git_result(
     }
 }
 
-pub(crate) fn apply_github_readme_result(
+pub fn apply_github_readme_result(
     data: &mut PreviewData,
     tab_index: usize,
     readme: Option<Text<'static>>,
@@ -157,7 +157,7 @@ pub(crate) fn apply_github_readme_result(
     }
 }
 
-pub(crate) fn ensure_git_for_preview(
+pub fn ensure_git_for_preview(
     path: &str,
     data: &PreviewData,
     git_in_flight: &mut HashSet<String>,
@@ -203,7 +203,7 @@ pub(crate) fn ensure_git_for_preview(
     });
 }
 
-pub(crate) fn build_preview_data(
+pub fn build_preview_data(
     path: &str,
     accent: Color,
     muted: Color,
@@ -232,7 +232,7 @@ pub(crate) fn build_preview_data(
     }
 }
 
-pub(crate) fn build_remote_branch_preview_data(
+pub fn build_remote_branch_preview_data(
     bare_path: &str,
     remote_branch: &str,
     target_path: &str,
@@ -251,10 +251,7 @@ pub(crate) fn build_remote_branch_preview_data(
         Line::from(Span::styled(display_path_for_user(target_path), value)),
     ];
 
-    if let Some(log_output) = run_git_dir_command_allow_empty(
-        Path::new(bare_path),
-        &["log", "-3", "--pretty=format:%s (%cr)", remote_branch],
-    ) {
+    if let Some(log_output) = remote_branch_recent_commits(bare_path, remote_branch) {
         if !log_output.trim().is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled("Recent commits", heading)));
@@ -279,7 +276,10 @@ pub(crate) fn build_remote_branch_preview_data(
     }
 }
 
-fn preview_targets_for_path(path: &str, shorten_worktree_tab_labels: bool) -> Vec<PreviewTarget> {
+pub fn preview_targets_for_path(
+    path: &str,
+    shorten_worktree_tab_labels: bool,
+) -> Vec<PreviewTarget> {
     let fallback = PreviewTarget {
         path: path.to_string(),
         label: entry_name(path),
@@ -307,7 +307,7 @@ fn preview_targets_for_path(path: &str, shorten_worktree_tab_labels: bool) -> Ve
     vec![fallback]
 }
 
-pub(crate) fn sort_worktrees_default_first(
+pub fn sort_worktrees_default_first(
     worktrees: &mut Vec<&GitWorktree>,
     default_branch: Option<&str>,
 ) {
@@ -360,17 +360,40 @@ fn build_preview_text(path: &str, accent: Color, muted: Color, text: Color) -> T
     Text::from(lines)
 }
 
-fn build_git_text_for_preview(
-    path: &str,
-    selected_repo_is_bare: bool,
-    accent: Color,
-    _muted: Color,
-    text: Color,
-) -> Option<Text<'static>> {
-    let heading = Style::default().fg(accent).add_modifier(Modifier::BOLD);
-    let value = Style::default().fg(text);
-    let max_lines = 200usize;
+/// Git facts for one preview tab. Both UIs render it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct GitSummary {
+    /// The selected project is a bare repository (container layout).
+    pub bare_repository: bool,
+    /// First line of `git status -sb`, without `## `.
+    pub branch: Option<String>,
+    /// Linked worktrees, only for a bare repository.
+    pub worktrees: Option<Vec<GitSummaryWorktree>>,
+    pub recent_commits: Vec<String>,
+    pub staged: Vec<String>,
+    pub unstaged: Vec<String>,
+    pub untracked: Vec<String>,
+}
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct GitSummaryWorktree {
+    pub label: String,
+    pub path: String,
+}
+
+const GIT_SUMMARY_MAX_LINES: usize = 200;
+
+fn output_lines(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .take(GIT_SUMMARY_MAX_LINES)
+        .map(str::to_string)
+        .collect()
+}
+
+/// Collect the git panel facts for `path`. Returns `None` when `path` is not
+/// in a repository or when git has nothing to show.
+pub fn git_summary_for_path(path: &str, selected_repo_is_bare: bool) -> Option<GitSummary> {
     let path_buf = Path::new(path);
     let repo_dir = git_command_dir_for_path(path_buf)?;
     let inside_work_tree = git_is_inside_work_tree(&repo_dir);
@@ -379,110 +402,119 @@ fn build_git_text_for_preview(
         return None;
     }
 
-    let mut lines = Vec::new();
-    if selected_repo_is_bare {
-        lines.push(Line::from(Span::styled("Bare repository", heading)));
-    }
+    let mut summary = GitSummary {
+        bare_repository: selected_repo_is_bare,
+        ..GitSummary::default()
+    };
 
     if inside_work_tree {
-        if let Some(status_output) = run_git_command_allow_empty(&repo_dir, &["status", "-sb"]) {
-            if let Some(first_line) = status_output.lines().next() {
-                let branch = first_line.trim_start_matches("## ");
-                if !branch.trim().is_empty() {
-                    lines.push(Line::from(Span::styled(
-                        format!("Branch: {}", branch),
-                        heading,
-                    )));
-                }
-            }
-        }
+        summary.branch = run_git_command_allow_empty(&repo_dir, &["status", "-sb"])
+            .and_then(|output| output.lines().next().map(str::to_string))
+            .map(|line| line.trim_start_matches("## ").to_string())
+            .filter(|branch| !branch.trim().is_empty());
     }
 
     if bare_repository {
-        let worktrees = git_worktrees_for_path(path_buf);
-        let non_bare_worktrees = worktrees
-            .iter()
-            .filter(|worktree| !worktree.bare)
-            .collect::<Vec<&GitWorktree>>();
+        summary.worktrees = Some(
+            git_worktrees_for_path(path_buf)
+                .iter()
+                .filter(|worktree| !worktree.bare)
+                .map(|worktree| GitSummaryWorktree {
+                    label: git_worktree_label(worktree, false),
+                    path: worktree.path.clone(),
+                })
+                .collect(),
+        );
+    }
+
+    match run_git_command_allow_empty(&repo_dir, &["log", "-3", "--pretty=format:%s (%cr)"]) {
+        Some(output) => summary.recent_commits = output_lines(output.trim_end()),
+        None if inside_work_tree => return None,
+        None => {}
+    }
+    summary.recent_commits.retain(|line| !line.is_empty());
+
+    if inside_work_tree {
+        summary.staged = run_git_command_allow_empty(&repo_dir, &["diff", "--stat", "--cached"])
+            .map(|output| output_lines(&output))
+            .unwrap_or_default();
+        summary.unstaged = run_git_command_allow_empty(&repo_dir, &["diff", "--stat"])
+            .map(|output| output_lines(&output))
+            .unwrap_or_default();
+        summary.untracked =
+            run_git_command_allow_empty(&repo_dir, &["ls-files", "--others", "--exclude-standard"])
+                .map(|output| output_lines(&output))
+                .unwrap_or_default();
+    }
+
+    (summary != GitSummary::default()).then_some(summary)
+}
+
+fn build_git_text_for_preview(
+    path: &str,
+    selected_repo_is_bare: bool,
+    accent: Color,
+    _muted: Color,
+    text: Color,
+) -> Option<Text<'static>> {
+    let summary = git_summary_for_path(path, selected_repo_is_bare)?;
+    let heading = Style::default().fg(accent).add_modifier(Modifier::BOLD);
+    let value = Style::default().fg(text);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let section = |lines: &mut Vec<Line<'static>>, title: &str, body: &[String]| {
+        if body.is_empty() {
+            return;
+        }
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
-        lines.push(Line::from(Span::styled("Worktrees", heading)));
-        if non_bare_worktrees.is_empty() {
-            lines.push(Line::from(Span::styled("No worktrees", value)));
+        lines.push(Line::from(Span::styled(title.to_string(), heading)));
+        lines.extend(
+            body.iter()
+                .map(|line| Line::from(Span::styled(line.clone(), value))),
+        );
+    };
+
+    if summary.bare_repository {
+        lines.push(Line::from(Span::styled("Bare repository", heading)));
+    }
+    if let Some(branch) = summary.branch.as_deref() {
+        lines.push(Line::from(Span::styled(
+            format!("Branch: {branch}"),
+            heading,
+        )));
+    }
+    if let Some(worktrees) = summary.worktrees.as_ref() {
+        let body = if worktrees.is_empty() {
+            vec!["No worktrees".to_string()]
         } else {
-            for worktree in non_bare_worktrees {
-                lines.push(Line::from(Span::styled(
+            worktrees
+                .iter()
+                .map(|worktree| {
                     format!(
                         "{}  {}",
-                        git_worktree_label(worktree, false),
+                        worktree.label,
                         display_path_for_user(&worktree.path)
-                    ),
-                    value,
-                )));
-            }
-        }
+                    )
+                })
+                .collect()
+        };
+        section(&mut lines, "Worktrees", &body);
     }
+    section(&mut lines, "Recent commits", &summary.recent_commits);
+    section(&mut lines, "Staged changes", &summary.staged);
+    section(&mut lines, "Unstaged changes", &summary.unstaged);
+    section(&mut lines, "Untracked", &summary.untracked);
 
-    if let Some(log_output) =
-        run_git_command_allow_empty(&repo_dir, &["log", "-3", "--pretty=format:%s (%cr)"])
-    {
-        if !log_output.trim().is_empty() {
-            if !lines.is_empty() {
-                lines.push(Line::from(""));
-            }
-            lines.push(Line::from(Span::styled("Recent commits", heading)));
-            lines.extend(lines_from_output(&log_output, value, max_lines));
-        }
-    } else if inside_work_tree {
-        return None;
-    }
+    (!lines.is_empty()).then(|| Text::from(lines))
+}
 
-    if !inside_work_tree {
-        if lines.is_empty() {
-            return None;
-        }
-        return Some(Text::from(lines));
-    }
-
-    if let Some(staged_output) =
-        run_git_command_allow_empty(&repo_dir, &["diff", "--stat", "--cached"])
-    {
-        if !staged_output.trim().is_empty() {
-            if !lines.is_empty() {
-                lines.push(Line::from(""));
-            }
-            lines.push(Line::from(Span::styled("Staged changes", heading)));
-            lines.extend(lines_from_output(&staged_output, value, max_lines));
-        }
-    }
-
-    if let Some(unstaged_output) = run_git_command_allow_empty(&repo_dir, &["diff", "--stat"]) {
-        if !unstaged_output.trim().is_empty() {
-            if !lines.is_empty() {
-                lines.push(Line::from(""));
-            }
-            lines.push(Line::from(Span::styled("Unstaged changes", heading)));
-            lines.extend(lines_from_output(&unstaged_output, value, max_lines));
-        }
-    }
-
-    if let Some(untracked_output) =
-        run_git_command_allow_empty(&repo_dir, &["ls-files", "--others", "--exclude-standard"])
-    {
-        if !untracked_output.trim().is_empty() {
-            if !lines.is_empty() {
-                lines.push(Line::from(""));
-            }
-            lines.push(Line::from(Span::styled("Untracked", heading)));
-            lines.extend(lines_from_output(&untracked_output, value, max_lines));
-        }
-    }
-
-    if lines.is_empty() {
-        return None;
-    }
-    Some(Text::from(lines))
+/// `git log -3` of a remote branch, read from the bare repository.
+pub fn remote_branch_recent_commits(bare_path: &str, remote_branch: &str) -> Option<String> {
+    run_git_dir_command_allow_empty(
+        Path::new(bare_path),
+        &["log", "-3", "--pretty=format:%s (%cr)", remote_branch],
+    )
 }
 
 fn run_git_dir_command_allow_empty(bare_path: &Path, args: &[&str]) -> Option<String> {
@@ -509,7 +541,7 @@ fn build_path_lines(path: &str, value: Style) -> Vec<Line<'static>> {
     vec![Line::from(Span::styled(display_path_for_user(path), value))]
 }
 
-fn erd_output(path: &Path) -> Option<String> {
+pub fn erd_output(path: &Path) -> Option<String> {
     let path_str = path.to_string_lossy().to_string();
     let (mut args, used_default) = erd_args();
     args.push(path_str.clone());

@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum BindingContext {
+pub enum BindingContext {
     Global,
     Navigator,
     Preview,
@@ -16,7 +16,7 @@ pub(crate) enum BindingContext {
 }
 
 impl BindingContext {
-    pub(crate) const ORDERED: [Self; 11] = [
+    pub const ORDERED: [Self; 11] = [
         Self::Global,
         Self::Navigator,
         Self::Preview,
@@ -30,15 +30,15 @@ impl BindingContext {
         Self::ErrorOverlay,
     ];
 
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         binding_context_as_str(self)
     }
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         parse_binding_context(value)
     }
 
-    pub(crate) const fn ordered() -> &'static [Self] {
+    pub const fn ordered() -> &'static [Self] {
         &Self::ORDERED
     }
 }
@@ -77,7 +77,7 @@ fn parse_binding_context(value: &str) -> Option<BindingContext> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum CoreAction {
+pub enum CoreAction {
     Navigate,
     Actions,
     Create,
@@ -106,11 +106,11 @@ pub(crate) enum CoreAction {
 }
 
 impl CoreAction {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         core_action_as_str(self)
     }
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         parse_core_action(value)
     }
 }
@@ -178,11 +178,11 @@ fn parse_core_action(value: &str) -> Option<CoreAction> {
 
 // The keybinding engine (chord parsing, targets, keymap resolution) lives in
 // gator; navgator supplies its own contexts and actions and reuses the engine.
-pub(crate) use gator::keymap::{is_valid_action_id, KeyChord};
+pub use gator::keymap::{is_valid_action_id, KeyChord};
 
-pub(crate) type BindingTarget = gator::keymap::BindingTarget<CoreAction>;
-pub(crate) type Binding = gator::keymap::Binding<CoreAction>;
-pub(crate) type Keymap = gator::keymap::Keymap<BindingContext, CoreAction>;
+pub type BindingTarget = gator::keymap::BindingTarget<CoreAction>;
+pub type Binding = gator::keymap::Binding<CoreAction>;
+pub type Keymap = gator::keymap::Keymap<BindingContext, CoreAction>;
 
 impl gator::keymap::BindingContext for BindingContext {
     fn as_str(self) -> &'static str {
@@ -212,7 +212,7 @@ impl gator::keymap::CoreAction for CoreAction {
     }
 }
 
-pub(crate) fn target_is_compatible(context: BindingContext, target: &BindingTarget) -> bool {
+pub fn target_is_compatible(context: BindingContext, target: &BindingTarget) -> bool {
     use BindingContext::*;
     use CoreAction::*;
 
@@ -321,7 +321,7 @@ fn fallback_contexts(context: BindingContext) -> &'static [BindingContext] {
     }
 }
 
-pub(crate) fn default_keymap() -> Keymap {
+pub fn default_keymap() -> Keymap {
     use BindingContext::*;
     use CoreAction::*;
 

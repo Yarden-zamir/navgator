@@ -4,7 +4,7 @@ use crate::model::{
     Focus, HelpColors, HelpContext, PreviewSettings, RemoteToggleState, SidePanelRender, UiLayout,
     VisibleListArgs, DATE_PLACEHOLDER, MIN_PARTIAL_TAB_WIDTH, TAB_DIVIDER_WIDTH,
 };
-use crate::search::{entry_match_context, QueryTokens};
+use crate::search::{entry_match_context, highlight_mask, QueryTokens};
 use gator::fuzzy_match;
 use gator::text::hsl_to_rgb;
 pub(crate) use gator::text::rect_contains;
@@ -777,14 +777,7 @@ fn highlight_match_spans(
         return vec![Span::styled(value.to_string(), Style::default().fg(text))];
     }
 
-    let mut highlighted = vec![false; value.chars().count()];
-    for token in tokens {
-        for index in match_indices(token, value) {
-            if let Some(slot) = highlighted.get_mut(index) {
-                *slot = true;
-            }
-        }
-    }
+    let highlighted = highlight_mask(value, &tokens);
 
     let normal = Style::default().fg(text);
     let matched = Style::default().fg(accent).add_modifier(Modifier::BOLD);
@@ -820,48 +813,6 @@ fn highlight_match_spans(
         spans.push(Span::styled(current, style));
     }
     spans
-}
-
-fn match_indices(query: &str, value: &str) -> Vec<usize> {
-    exact_match_indices(query, value).unwrap_or_else(|| fuzzy_match_indices(query, value))
-}
-
-fn exact_match_indices(query: &str, value: &str) -> Option<Vec<usize>> {
-    if query.is_empty() {
-        return Some(Vec::new());
-    }
-    let value_lower = value.to_lowercase();
-    let query_lower = query.to_lowercase();
-    let start_byte = value_lower.find(&query_lower)?;
-    let start = value
-        .char_indices()
-        .take_while(|(byte_index, _)| *byte_index < start_byte)
-        .count();
-    let len = query.chars().count();
-    Some((start..start + len).collect())
-}
-
-fn fuzzy_match_indices(query: &str, value: &str) -> Vec<usize> {
-    let mut query_chars = query.chars().filter(|ch| !ch.is_whitespace());
-    let mut current = query_chars.next();
-    if current.is_none() {
-        return Vec::new();
-    }
-
-    let mut matches = Vec::new();
-    for (index, ch) in value.chars().enumerate() {
-        let Some(expected) = current else {
-            break;
-        };
-        if expected.eq_ignore_ascii_case(&ch) {
-            matches.push(index);
-            current = query_chars.next();
-            if current.is_none() {
-                return matches;
-            }
-        }
-    }
-    Vec::new()
 }
 
 fn build_tag_spans(

@@ -1,26 +1,32 @@
-use crate::model::{MatchScore, NavigateEntry, SortMeta, SortMode};
+use crate::model::{
+    MatchScore, NavigateEntry, NavigateEntryKind, SortMeta, SortMode, SortSettings,
+};
 use gator::fuzzy_match;
 use gator::search::match_score;
-use std::{cmp::Ordering, collections::HashMap, path::Path};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 #[derive(Default)]
-pub(crate) struct QueryTokens {
-    pub(crate) folder: Vec<String>,
-    pub(crate) tags: Vec<String>,
-    pub(crate) any: Vec<String>,
+pub struct QueryTokens {
+    pub folder: Vec<String>,
+    pub tags: Vec<String>,
+    pub any: Vec<String>,
 }
 
 impl QueryTokens {
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.folder.is_empty() && self.tags.is_empty() && self.any.is_empty()
     }
 
-    pub(crate) fn needs_tags(&self) -> bool {
+    pub fn needs_tags(&self) -> bool {
         !self.tags.is_empty()
     }
 }
 
-pub(crate) fn parse_query_tokens(query: &str) -> QueryTokens {
+pub fn parse_query_tokens(query: &str) -> QueryTokens {
     let mut tokens = QueryTokens::default();
     for raw in query.split_whitespace() {
         if let Some(rest) = raw.strip_prefix('@') {
@@ -38,7 +44,7 @@ pub(crate) fn parse_query_tokens(query: &str) -> QueryTokens {
     tokens
 }
 
-pub(crate) fn filter_and_sort(
+pub fn filter_and_sort(
     entries: &[NavigateEntry],
     query: &str,
     sort_mode: SortMode,
@@ -59,7 +65,83 @@ pub(crate) fn filter_and_sort(
     indices
 }
 
-pub(crate) fn index_for_entry_id(
+#[derive(Clone, Copy)]
+pub struct ResultSortContext<'a> {
+    pub show_remote_branches: bool,
+    pub sort_settings: &'a SortSettings,
+    pub current_project_path: Option<&'a str>,
+}
+
+pub fn filter_and_sort_visible(
+    entries: &[NavigateEntry],
+    query: &str,
+    sort_mode: SortMode,
+    meta_cache: &HashMap<String, SortMeta>,
+    tag_cache: &HashMap<String, Vec<String>>,
+    context: ResultSortContext<'_>,
+) -> Vec<usize> {
+    let ignored_paths = context.sort_settings.ignored_paths(sort_mode);
+    let mut indices: Vec<usize> = filter_and_sort(
+        entries,
+        query,
+        sort_mode,
+        meta_cache,
+        tag_cache,
+        ignored_paths,
+    )
+    .into_iter()
+    .filter(|index| context.show_remote_branches || !is_remote_branch_entry(&entries[*index]))
+    .collect();
+    if query.trim().is_empty() {
+        let pinned_path = context
+            .current_project_path
+            .filter(|_| context.sort_settings.pin_current_project);
+        pin_current_project(&mut indices, entries, pinned_path, ignored_paths);
+    }
+    indices
+}
+
+pub fn pin_current_project(
+    indices: &mut Vec<usize>,
+    entries: &[NavigateEntry],
+    pinned_path: Option<&str>,
+    ignored_paths: Option<&HashSet<String>>,
+) {
+    let Some(pinned_path) = pinned_path else {
+        return;
+    };
+    let Some(position) = indices.iter().position(|index| {
+        let entry = &entries[*index];
+        let ignored = ignored_paths
+            .map(|paths| paths.contains(&entry.metadata_path))
+            .unwrap_or(false);
+        !ignored && entry_matches_path(entry, pinned_path)
+    }) else {
+        return;
+    };
+    let index = indices.remove(position);
+    indices.insert(0, index);
+}
+
+pub fn entry_matches_path(entry: &NavigateEntry, path: &str) -> bool {
+    entry.selection_path == path
+        || entry.metadata_path == path
+        || entry.preview_root_path == path
+        || entry.preferred_preview_path.as_deref() == Some(path)
+}
+
+pub fn visible_entry_count(entries: &[NavigateEntry], show_remote_branches: bool) -> usize {
+    entries
+        .iter()
+        .filter(|entry| show_remote_branches || !is_remote_branch_entry(entry))
+        .count()
+}
+
+pub fn is_remote_branch_entry(entry: &NavigateEntry) -> bool {
+    matches!(entry.kind, NavigateEntryKind::RemoteBranch { .. })
+}
+
+pub fn index_for_entry_id(
     entries: &[NavigateEntry],
     filtered: &[usize],
     id: &str,
@@ -72,7 +154,62 @@ pub(crate) fn index_for_entry_id(
     })
 }
 
-pub(crate) fn entry_name(path: &str) -> String {
+/// One flag per char of `value`: true where a query token matches.
+pub fn highlight_mask(value: &str, tokens: &[&str]) -> Vec<bool> {
+    let mut highlighted = vec![false; value.chars().count()];
+    for token in tokens {
+        for index in match_indices(token, value) {
+            if let Some(slot) = highlighted.get_mut(index) {
+                *slot = true;
+            }
+        }
+    }
+    highlighted
+}
+
+pub fn match_indices(query: &str, value: &str) -> Vec<usize> {
+    exact_match_indices(query, value).unwrap_or_else(|| fuzzy_match_indices(query, value))
+}
+
+fn exact_match_indices(query: &str, value: &str) -> Option<Vec<usize>> {
+    if query.is_empty() {
+        return Some(Vec::new());
+    }
+    let value_lower = value.to_lowercase();
+    let query_lower = query.to_lowercase();
+    let start_byte = value_lower.find(&query_lower)?;
+    let start = value
+        .char_indices()
+        .take_while(|(byte_index, _)| *byte_index < start_byte)
+        .count();
+    let len = query.chars().count();
+    Some((start..start + len).collect())
+}
+
+fn fuzzy_match_indices(query: &str, value: &str) -> Vec<usize> {
+    let mut query_chars = query.chars().filter(|ch| !ch.is_whitespace());
+    let mut current = query_chars.next();
+    if current.is_none() {
+        return Vec::new();
+    }
+
+    let mut matches = Vec::new();
+    for (index, ch) in value.chars().enumerate() {
+        let Some(expected) = current else {
+            break;
+        };
+        if expected.eq_ignore_ascii_case(&ch) {
+            matches.push(index);
+            current = query_chars.next();
+            if current.is_none() {
+                return matches;
+            }
+        }
+    }
+    Vec::new()
+}
+
+pub fn entry_name(path: &str) -> String {
     Path::new(path)
         .file_name()
         .and_then(|part| part.to_str())
@@ -80,7 +217,7 @@ pub(crate) fn entry_name(path: &str) -> String {
         .to_string()
 }
 
-pub(crate) fn entry_match_context(
+pub fn entry_match_context(
     entry: &NavigateEntry,
     tags: &[String],
     tokens: &QueryTokens,
@@ -362,9 +499,9 @@ fn compare_time(
 
 #[cfg(test)]
 mod tests {
-    use super::filter_and_sort;
+    use super::{filter_and_sort, pin_current_project};
     use crate::model::{NavigateEntry, NavigateEntryKind, SortMeta, SortMode};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn searches_visible_context_text() {
@@ -575,6 +712,25 @@ mod tests {
             ),
             vec![3, 1, 0, 2]
         );
+    }
+
+    #[test]
+    fn ignored_current_project_is_not_pinned_above_other_results() {
+        let entries = vec![
+            test_entry("normal", "normal", "/repos/normal"),
+            test_entry("ignored", "ignored", "/repos/ignored"),
+        ];
+        let ignored_paths = HashSet::from(["/repos/ignored".to_string()]);
+        let mut indices = vec![0, 1];
+
+        pin_current_project(
+            &mut indices,
+            &entries,
+            Some("/repos/ignored"),
+            Some(&ignored_paths),
+        );
+
+        assert_eq!(indices, vec![0, 1]);
     }
 
     fn test_entry(id: &str, display: &str, path: &str) -> NavigateEntry {

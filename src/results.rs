@@ -23,23 +23,23 @@ use std::{
 };
 
 const WORKTREE_PROVIDER_PREFIX: &str = "worktree:";
-pub(crate) const REMOTE_BRANCH_PROVIDER_PREFIX: &str = "remote-branch:";
+pub const REMOTE_BRANCH_PROVIDER_PREFIX: &str = "remote-branch:";
 const WORKTREE_CACHE_FILE: &str = "worktrees.json";
 const WORKTREE_CACHE_VERSION: u32 = 2;
 const REMOTE_BRANCH_CACHE_FILE: &str = "remote-branches.json";
 const REMOTE_BRANCH_CACHE_VERSION: u32 = 1;
 const BRANCH_ICON: &str = "";
 
-pub(crate) trait ResultProvider {
+pub trait ResultProvider {
     fn initial_entries(&self) -> Vec<NavigateEntry>;
     fn spawn_updates(&self, _tx: mpsc::Sender<ResultUpdate>) {}
 }
 
-pub(crate) struct ProjectResultProvider {
+pub struct ProjectResultProvider {
     paths: Vec<PathBuf>,
 }
 
-pub(crate) struct WorktreeResultProvider {
+pub struct WorktreeResultProvider {
     project_entries: Vec<NavigateEntry>,
 }
 
@@ -63,9 +63,7 @@ struct RemoteBranchCacheRepo {
     branches: Vec<String>,
 }
 
-pub(crate) fn build_items_with_config_entries(
-    config_entries: &[String],
-) -> AppResult<BuildItemsResult> {
+pub fn build_items_with_config_entries(config_entries: &[String]) -> AppResult<BuildItemsResult> {
     let config = load_config(config_entries)?;
     let project_provider =
         ProjectResultProvider::from_config_paths(config.static_items, config.index_folders);
@@ -87,7 +85,7 @@ pub(crate) fn build_items_with_config_entries(
     })
 }
 
-pub(crate) fn spawn_worktree_result_provider(
+pub fn spawn_worktree_result_provider(
     project_entries: &[NavigateEntry],
     tx: mpsc::Sender<ResultUpdate>,
 ) {
@@ -97,7 +95,7 @@ pub(crate) fn spawn_worktree_result_provider(
     provider.spawn_updates(tx);
 }
 
-pub(crate) fn spawn_remote_branch_result_provider(
+pub fn spawn_remote_branch_result_provider(
     entry: NavigateEntry,
     tx: mpsc::Sender<ResultUpdate>,
     settings: RemoteSettings,
