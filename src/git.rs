@@ -516,11 +516,13 @@ fn dir_name_for_branch_with_candidates(
 }
 
 fn local_ref_branch_names(bare: &Path) -> Vec<String> {
+    // Full ref names: a short local name such as feat/x looks like a remote
+    // ref, and stripping its first segment made feat/x clash with itself.
     let Some(output) = git_stdout_path(
         bare,
         &[
             "for-each-ref",
-            "--format=%(refname:short)",
+            "--format=%(refname)",
             "refs/heads",
             "refs/remotes",
         ],
@@ -531,14 +533,17 @@ fn local_ref_branch_names(bare: &Path) -> Vec<String> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.ends_with("/HEAD"))
-        .map(|candidate| {
-            if candidate.contains('/') {
-                local_branch_for_remote(candidate)
-            } else {
-                candidate.to_string()
-            }
-        })
+        .filter_map(branch_name_for_ref)
         .collect()
+}
+
+fn branch_name_for_ref(full_ref: &str) -> Option<String> {
+    if let Some(branch) = full_ref.strip_prefix("refs/heads/") {
+        return Some(branch.to_string());
+    }
+    full_ref
+        .strip_prefix("refs/remotes/")
+        .map(local_branch_for_remote)
 }
 
 fn basename_branch_sets(branches: Vec<String>) -> HashMap<String, HashSet<String>> {
@@ -733,6 +738,33 @@ fn git_branch_label(branch: &str) -> String {
 mod tests {
     use super::*;
     use std::{env, fs, process::Command};
+
+    #[test]
+    fn branch_name_for_ref_keeps_slashes_in_local_branches() {
+        assert_eq!(
+            branch_name_for_ref("refs/heads/feat/yarden/auth").as_deref(),
+            Some("feat/yarden/auth")
+        );
+        assert_eq!(
+            branch_name_for_ref("refs/remotes/origin/feat/yarden/auth").as_deref(),
+            Some("feat/yarden/auth")
+        );
+        assert_eq!(branch_name_for_ref("refs/tags/v1"), None);
+    }
+
+    #[test]
+    fn branch_and_its_remote_copy_do_not_conflict() {
+        let basename_branches = basename_branch_sets(vec![
+            branch_name_for_ref("refs/heads/feat/yarden/auth").expect("local"),
+            branch_name_for_ref("refs/remotes/origin/feat/yarden/auth").expect("remote"),
+        ]);
+        let name = dir_name_for_branch_with_candidates(
+            Path::new("/nonexistent-container"),
+            "feat/yarden/auth",
+            &basename_branches,
+        );
+        assert_eq!(name, "auth");
+    }
 
     #[test]
     fn checkout_remote_branch_uses_existing_worktree() {
