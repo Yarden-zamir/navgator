@@ -1,6 +1,8 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "kebab-case")]
 pub enum BindingContext {
     Global,
     Navigator,
@@ -76,7 +78,9 @@ fn parse_binding_context(value: &str) -> Option<BindingContext> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "kebab-case")]
 pub enum CoreAction {
     Navigate,
     Actions,
@@ -431,6 +435,49 @@ mod tests {
 
     fn event(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
+    }
+
+    #[test]
+    fn serialized_names_match_config_names() {
+        for context in BindingContext::ordered() {
+            assert_eq!(
+                serde_json::to_value(context).expect("context serializes"),
+                context.as_str()
+            );
+        }
+        for name in [
+            "navigate",
+            "actions",
+            "create",
+            "run",
+            "run-and-close",
+            "cancel",
+            "back",
+            "confirm",
+            "accept",
+            "move-up",
+            "move-down",
+            "move-left",
+            "move-right",
+            "page-up",
+            "page-down",
+            "move-home",
+            "move-end",
+            "copy-path",
+            "delete-worktree",
+            "toggle-remotes",
+            "edit-tags",
+            "cycle-sort",
+            "clear-input",
+            "remove-last-tag",
+            "dismiss-overlay",
+        ] {
+            let action = CoreAction::parse(name).expect("known core action");
+            assert_eq!(
+                serde_json::to_value(action).expect("action serializes"),
+                name
+            );
+        }
     }
 
     #[test]

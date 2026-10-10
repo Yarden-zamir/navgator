@@ -1,0 +1,21 @@
+[package]
+name = "navgator-web"
+version = "0.1.0"
+edition = "2021"
+description = "🐊 navgator in the browser: the project and worktree navigator served on localhost"
+license = "MIT"
+repository = "https://github.com/Yarden-zamir/navgator"
+publish = false
+
+[dependencies]
+axum = "0.8.9"
+gator = { git = "https://github.com/Yarden-zamir/gator", branch = "main" }
+navgator = { path = "..", features = ["ts"] }
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+ratatui = "0.30"
+rust-embed = { version = "8.13.0", features = ["mime-guess"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+ts-rs = "12.0.1"

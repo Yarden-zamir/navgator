@@ -14,6 +14,8 @@ use std::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct GithubRepoSummary {
     pub description: Option<String>,
     pub language: Option<String>,

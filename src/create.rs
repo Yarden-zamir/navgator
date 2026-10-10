@@ -11,7 +11,9 @@ use std::{
 /// One `(prompt name, value)` pair after normalization.
 pub type CreateValues = Vec<(String, String)>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct PathSuggestion {
     pub display: String,
     pub value: String,
@@ -19,7 +21,9 @@ pub struct PathSuggestion {
 }
 
 /// A required prompt has no value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
 pub struct MissingCreateValue {
     pub prompt_index: usize,
     pub message: String,

@@ -1,6 +1,7 @@
 [package]
 name = "navgator"
 version = "0.5.1"
+default-run = "navgator"
 edition = "2021"
 description = "🐊 Rust TUI project navigator with Git worktree and preview support"
 license = "MIT"
@@ -19,3 +20,12 @@ schemars = { version = "0.8", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tui-input = { version = "0.15", features = ["crossterm"] }
+ts-rs = { version = "12.0.1", optional = true }
+
+[features]
+# TypeScript bindings for the types that the web API sends (used by navgator-web).
+ts = ["dep:ts-rs"]
+
+[workspace]
+members = [".", "web"]
+default-members = [".", "web"]

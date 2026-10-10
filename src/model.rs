@@ -616,7 +616,10 @@ impl Default for BranchSettings {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Serialized names match the `sort.default` config values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "kebab-case")]
 pub enum SortMode {
     Match,
     AlphaAsc,
@@ -630,6 +633,18 @@ pub enum SortMode {
 }
 
 impl SortMode {
+    pub const ALL: [SortMode; 9] = [
+        SortMode::Match,
+        SortMode::AlphaAsc,
+        SortMode::AlphaDesc,
+        SortMode::CreatedAsc,
+        SortMode::CreatedDesc,
+        SortMode::ModifiedAsc,
+        SortMode::ModifiedDesc,
+        SortMode::AccessedDesc,
+        SortMode::Recents,
+    ];
+
     pub fn next(self) -> Self {
         match self {
             SortMode::Match => SortMode::AlphaAsc,

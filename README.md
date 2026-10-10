@@ -1,6 +1,6 @@
 # navgator
 
-🐊 Rust TUI project navigator with Git worktree and preview support.
+🐊 Rust TUI project navigator with Git worktree and preview support. The same navigator also runs as a local web app (`navgator-web`).
 
 Nerd Font is required for gator-family CLIs so built-in icons render correctly; the Homebrew formula's caveats suggest one.
 
@@ -220,11 +220,49 @@ Prompt types are `text` and `path`. Path prompts represent filesystem paths; for
 
 Terminal launch selectors match recipe labels directly or by slug, so `New project` can be launched with `navgator create new-project`. When no path is provided, create launches use the current directory as the selected path for `{path}` and `NAVGATOR_SELECTED_PATH`.
 
+## Web App
+
+`navgator-web` serves the navigator as a page on `http://127.0.0.1:4747`. It reads the same config, caches, tags and usage history as the terminal UI.
+
+```sh
+cargo build --release
+target/release/navgator-web --open
+```
+
+Options: `--port PORT`, `--open` (opens the default browser), and `--config-entry TOML` (repeatable, as for `navgator`).
+
+Differences from the terminal UI:
+
+- A browser has no shell to `cd` into. Thus `navigate` bindings (plain Enter by default) open the action picker, and actions of type `navigate` do not show.
+- Actions run without a terminal: stdin is closed and the output is captured. Interactive tools such as `claude` need an action that opens a terminal, for example `herdr-open-path {path} claude`.
+- `run-and-close` runs the action like `run`.
+- After a create recipe, the action picker opens for the new path.
+- The current working directory is not pinned to the top.
+
+The page uses the CSS variables of T3 Code themes. When `~/.t3/userdata/settings.json` names a theme file in `~/.t3/userdata/themes/`, the page takes its colors, fonts, border width, radius and shadow.
+
+Security: the server listens on `127.0.0.1` only. It rejects requests whose `Host` is not this server (DNS rebinding) and non-GET requests from another origin. It sends no CORS headers.
+
+### Develop the web UI
+
+```sh
+cd web/ui
+npm install
+npm run dev          # hot reload on :5173, proxies the API to a running navgator-web
+npm run typecheck
+```
+
+`cargo build` runs `npm run build` in `web/ui` when `web/ui/node_modules` exists and embeds `web/ui/dist` in the binary. Without `node_modules`, the binary serves a "UI not built" page.
+
+The TypeScript API types in `web/ui/src/api/` come from the Rust structs. After an API change, run `cargo test -p navgator-web` and commit the regenerated files.
+
 ## Build
 
 ```sh
 cargo build --release
 ```
+
+This builds both binaries: `target/release/navgator` and `target/release/navgator-web`.
 
 ## Check
 
