@@ -15,7 +15,7 @@ api.bootstrap().then(
       </StrictMode>,
     ),
   (error: unknown) => {
-    root.textContent = `navgator-web could not load its config: ${String(error)}`;
+    root.textContent = `navgator could not load its config: ${String(error)}`;
     root.className = "fatal";
   },
 );

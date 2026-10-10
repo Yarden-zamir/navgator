@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum BindingContext {
     Global,
@@ -79,7 +79,7 @@ fn parse_binding_context(value: &str) -> Option<BindingContext> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum CoreAction {
     Navigate,

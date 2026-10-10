@@ -1,9 +1,9 @@
 # AGENTS.md
 
-- This repo owns the `navgator` project navigator: the terminal UI binary and the `navgator-web` web app.
-- The repo is a Cargo workspace. The root crate is a library (`src/lib.rs`) plus the TUI binary (`src/main.rs`). `web/` holds the `navgator-web` crate and its UI in `web/ui`.
-- Put shared logic in the library. Keep `src/main.rs`, `ui.rs`, `compositor.rs` and `onboarding.rs` for terminal-only behavior, and `web/` for web-only behavior.
-- After a change to an API type in `web/src`, or to a library type that the API sends, run `cargo test -p navgator-web`. It regenerates `web/ui/src/api/`; commit those files.
+- This repo owns the `navgator` project navigator binary: the terminal UI and the web app (`navgator web`).
+- The crate is a library (`src/lib.rs`) plus the binary (`src/main.rs`). The web server is `src/web/`; its UI is `web/ui`.
+- Put shared logic in the library. Keep `src/main.rs`, `ui.rs`, `compositor.rs` and `onboarding.rs` for terminal-only behavior, and `src/web/` plus `web/ui` for web-only behavior.
+- `cargo test` regenerates the web API types in `web/ui/src/api/`. After a change to a type that the API sends, commit those files.
 - For UI changes, run `npm install` once and `npm run typecheck` in `web/ui`.
 - Git, GitHub README, folder/worktree content, config, tags, metadata, search ranking, explanations, compositor, and app UI behavior live here.
 - Generic terminal/tooling helpers should stay in `gator`.

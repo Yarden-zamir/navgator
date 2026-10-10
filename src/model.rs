@@ -618,7 +618,7 @@ impl Default for BranchSettings {
 
 /// Serialized names match the `sort.default` config values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum SortMode {
     Match,

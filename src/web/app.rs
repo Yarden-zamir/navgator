@@ -1,19 +1,19 @@
 //! Server state. The same background providers as the terminal UI feed one
 //! store; every change bumps a broadcast so browsers refetch.
 
-use navgator::metadata::spawn_bulk_metadata_fetch;
-use navgator::model::keybindings::Keymap;
-use navgator::model::{
+use crate::metadata::spawn_bulk_metadata_fetch;
+use crate::model::keybindings::Keymap;
+use crate::model::{
     ActionSettings, BranchSettings, CreateSettings, MetaResult, NavigateEntry, NavigateEntryKind,
     PreviewSettings, RemoteSettings, ResultUpdate, SortMeta, SortMode, SortSettings, TagResult,
     DATE_PLACEHOLDER,
 };
-use navgator::results::{
+use crate::results::{
     build_items_with_config_entries, spawn_remote_branch_result_provider,
     spawn_worktree_result_provider, REMOTE_BRANCH_PROVIDER_PREFIX,
 };
-use navgator::tags::spawn_bulk_tag_fetch;
-use navgator::usage::AccessHistory;
+use crate::tags::spawn_bulk_tag_fetch;
+use crate::usage::AccessHistory;
 use std::{
     collections::{HashMap, HashSet},
     sync::{mpsc, Arc, Mutex, MutexGuard},
@@ -130,7 +130,7 @@ impl App {
     pub fn store(&self) -> MutexGuard<'_, Store> {
         self.store
             .lock()
-            .expect("navgator-web store mutex is poisoned")
+            .expect("navgator web store mutex is poisoned")
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<()> {

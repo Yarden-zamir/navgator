@@ -1,5 +1,5 @@
-// Typed calls to the navgator-web server. The types in ./api/ are generated
-// from the Rust structs (`cargo test -p navgator-web`); never edit them by hand.
+// Typed calls to the `navgator web` server. The types in ./api/ are generated
+// from the Rust structs (`cargo test`); never edit them by hand.
 
 import type { ActionRef } from "./api/ActionRef";
 import type { Bootstrap } from "./api/Bootstrap";

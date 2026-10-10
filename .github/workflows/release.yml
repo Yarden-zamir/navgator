@@ -65,6 +65,14 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
+      # build.rs embeds the web UI only when web/ui/node_modules exists.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+      - run: npm ci
+        working-directory: web/ui
       - run: cargo build --release
       - run: |
           mkdir -p dist

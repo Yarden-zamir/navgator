@@ -4,11 +4,11 @@ use axum::{body::Body, http::header, response::Response};
 use serde::Serialize;
 use std::convert::Infallible;
 use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
-use ts_rs::TS;
 
 /// One line of a progress stream. The last line is `done` or `error`; a
 /// stream that ends without one failed on the server.
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Progress {
     Message { text: String },

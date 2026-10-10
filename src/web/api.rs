@@ -1,9 +1,40 @@
 //! JSON API for the web UI. Every request and response type derives its
-//! TypeScript twin into `ui/src/api/` (`cargo test -p navgator-web` writes them).
+//! TypeScript twin into `web/ui/src/api/` (`cargo test` writes them).
 
-use crate::app::App;
-use crate::progress::stream_progress;
-use crate::render::{markdown_to_html, tree_lines, StyledSegment};
+use crate::actions::{
+    action_file_condition_matches, filtered_action_indexes, resolve_action, ResolvedAction,
+    RunnableAction,
+};
+use crate::commands::open_url;
+use crate::content::{
+    display_path_for_user, erd_output, git_summary_for_path, preview_targets_for_path,
+    remote_branch_recent_commits, GitSummary,
+};
+use crate::create::{
+    initial_prompt_values, path_suggestions_for_input, refill_dependent_defaults,
+    run_create_recipe, validate_create_values, PathSuggestion,
+};
+use crate::git::{
+    add_worktree_for_remote_with_progress, checkout_remote_branch_with_progress,
+    git_command_dir_for_path, git_is_bare_repository, remove_worktree_safely_with_progress,
+    selectable_worktree_path_for_project,
+};
+use crate::github::{github_content_for_path, GithubRepoSummary};
+use crate::metadata::{format_date_display, format_epoch_minutes};
+use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction};
+use crate::model::{
+    ActionKind, BranchSelectBehavior, CreatePromptKind, NavigateEntry, NavigateEntryKind, SortMode,
+    DATE_PLACEHOLDER,
+};
+use crate::search::{
+    entry_match_context, filter_and_sort_visible, highlight_mask, parse_query_tokens,
+    visible_entry_count, ResultSortContext,
+};
+use crate::tags::{collect_tag_suggestions, save_tags_for_path};
+use crate::usage::record_access;
+use crate::web::app::App;
+use crate::web::progress::stream_progress;
+use crate::web::render::{markdown_to_html, tree_lines, StyledSegment};
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -13,41 +44,9 @@ use axum::{
     },
     Json,
 };
-use navgator::actions::{
-    action_file_condition_matches, filtered_action_indexes, resolve_action, ResolvedAction,
-    RunnableAction,
-};
-use navgator::commands::open_url;
-use navgator::content::{
-    display_path_for_user, erd_output, git_summary_for_path, preview_targets_for_path,
-    remote_branch_recent_commits, GitSummary,
-};
-use navgator::create::{
-    initial_prompt_values, path_suggestions_for_input, refill_dependent_defaults,
-    run_create_recipe, validate_create_values, PathSuggestion,
-};
-use navgator::git::{
-    add_worktree_for_remote_with_progress, checkout_remote_branch_with_progress,
-    git_command_dir_for_path, git_is_bare_repository, remove_worktree_safely_with_progress,
-    selectable_worktree_path_for_project,
-};
-use navgator::github::{github_content_for_path, GithubRepoSummary};
-use navgator::metadata::{format_date_display, format_epoch_minutes};
-use navgator::model::keybindings::{BindingContext, BindingTarget, CoreAction};
-use navgator::model::{
-    ActionKind, BranchSelectBehavior, CreatePromptKind, NavigateEntry, NavigateEntryKind, SortMode,
-    DATE_PLACEHOLDER,
-};
-use navgator::search::{
-    entry_match_context, filter_and_sort_visible, highlight_mask, parse_query_tokens,
-    visible_entry_count, ResultSortContext,
-};
-use navgator::tags::{collect_tag_suggestions, save_tags_for_path};
-use navgator::usage::record_access;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, path::Path, process::Stdio, sync::Arc, time::Duration};
 use tokio_stream::{wrappers::BroadcastStream, Stream, StreamExt};
-use ts_rs::TS;
 
 type AppState = State<Arc<App>>;
 
@@ -57,7 +56,8 @@ pub struct ApiError {
     message: String,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ErrorBody {
     pub error: String,
 }
@@ -103,7 +103,7 @@ type ApiResult<T> = Result<Json<T>, ApiError>;
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(work)
         .await
-        .expect("navgator-web blocking task panicked")
+        .expect("navgator web blocking task panicked")
 }
 
 fn entry_or_404(app: &App, id: &str) -> Result<NavigateEntry, ApiError> {
@@ -113,7 +113,8 @@ fn entry_or_404(app: &App, id: &str) -> Result<NavigateEntry, ApiError> {
 
 // ---------------------------------------------------------------- bootstrap
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Bootstrap {
     pub version: String,
@@ -127,7 +128,8 @@ pub struct Bootstrap {
     pub creates: Vec<CreateView>,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct KeyContext {
     pub context: BindingContext,
@@ -136,7 +138,8 @@ pub struct KeyContext {
     pub bindings: Vec<KeyBinding>,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct KeyBinding {
     /// Canonical chord, for example `ctrl+enter` or `shift+tab`.
@@ -146,7 +149,8 @@ pub struct KeyBinding {
     pub target: KeyTarget,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum KeyTarget {
     Core { action: CoreAction },
@@ -154,20 +158,23 @@ pub enum KeyTarget {
     Disabled,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SortModeView {
     pub id: SortMode,
     pub label: String,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum BranchOnSelect {
     Worktree,
     Checkout,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ActionView {
     pub index: usize,
@@ -178,7 +185,8 @@ pub struct ActionView {
     pub navigate: bool,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateView {
     pub index: usize,
@@ -187,7 +195,8 @@ pub struct CreateView {
     pub prompts: Vec<CreatePromptView>,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePromptView {
     pub name: String,
@@ -274,7 +283,8 @@ pub async fn bootstrap(State(app): AppState) -> Json<Bootstrap> {
 
 // ------------------------------------------------------------------ results
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ResultsQuery {
     #[serde(default)]
@@ -284,7 +294,8 @@ pub struct ResultsQuery {
     pub remotes: bool,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Results {
     pub rows: Vec<ResultRow>,
@@ -293,7 +304,8 @@ pub struct Results {
     pub remote: RemoteView,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteView {
     pub message: Option<String>,
@@ -301,7 +313,8 @@ pub struct RemoteView {
     pub error: bool,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ResultRow {
     pub id: String,
@@ -314,7 +327,8 @@ pub struct ResultRow {
     pub metadata_path: String,
 }
 
-#[derive(Clone, Copy, Serialize, TS)]
+#[derive(Clone, Copy, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum EntryKind {
     Project,
@@ -322,13 +336,15 @@ pub enum EntryKind {
     RemoteBranch,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct TextRun {
     pub text: String,
     pub hit: bool,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct TagView {
     pub name: String,
     pub matched: bool,
@@ -447,7 +463,8 @@ pub async fn events(State(app): AppState) -> Sse<impl Stream<Item = Result<Event
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RemotesRequest {
     pub entry_id: String,
@@ -464,20 +481,23 @@ pub async fn load_remotes(
 
 // ------------------------------------------------------------------ preview
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EntryQuery {
     pub entry: String,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Preview {
     Local(LocalPreview),
     Remote(RemotePreview),
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct LocalPreview {
     pub root_path: String,
@@ -487,14 +507,16 @@ pub struct LocalPreview {
     pub preferred_path: Option<String>,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewTabView {
     pub path: String,
     pub label: String,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RemotePreview {
     pub remote_branch: String,
@@ -540,13 +562,15 @@ pub async fn preview(State(app): AppState, Query(query): Query<EntryQuery>) -> A
     ))
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PathQuery {
     pub path: String,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TreeView {
     pub display_path: String,
@@ -575,7 +599,8 @@ pub async fn tree(Query(query): Query<PathQuery>) -> Json<TreeView> {
     )
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct GitQuery {
     pub path: String,
@@ -586,7 +611,8 @@ pub async fn git(Query(query): Query<GitQuery>) -> Json<Option<GitSummary>> {
     Json(blocking(move || git_summary_for_path(&query.path, query.selected_repo_is_bare)).await)
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct GithubView {
     pub summary: Option<GithubRepoSummary>,
@@ -610,7 +636,8 @@ pub async fn github(Query(query): Query<PathQuery>) -> Json<Option<GithubView>> 
 
 // ------------------------------------------------------------------ actions
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TargetQuery {
     pub entry: String,
@@ -618,7 +645,8 @@ pub struct TargetQuery {
     pub tab: Option<String>,
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Target {
     pub path: String,
 }
@@ -644,7 +672,8 @@ pub async fn target(State(app): AppState, Query(query): Query<TargetQuery>) -> A
     Ok(Json(Target { path }))
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ActionsQuery {
     pub path: String,
@@ -668,7 +697,8 @@ pub async fn actions(State(app): AppState, Query(query): Query<ActionsQuery>) ->
     )
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RunRequest {
     pub action: ActionRef,
@@ -676,14 +706,16 @@ pub struct RunRequest {
 }
 
 /// Picker rows name an action by index; configured keybindings name it by id.
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "by", rename_all = "kebab-case")]
 pub enum ActionRef {
     Index { index: usize },
     Id { id: String },
 }
 
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RunResult {
     /// Set when the command still runs after the wait limit.
@@ -738,7 +770,7 @@ pub async fn run_action(
         },
         Ok(joined) => {
             let output = joined
-                .expect("navgator-web action task panicked")
+                .expect("navgator web action task panicked")
                 .map_err(ApiError::internal)?;
             RunResult {
                 still_running: false,
@@ -793,7 +825,8 @@ fn run_runnable(runnable: RunnableAction) -> Result<String, String> {
 
 // --------------------------------------------------- branches and worktrees
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EntryRequest {
     pub entry_id: String,
@@ -856,7 +889,8 @@ pub async fn delete_worktree(
 
 // ------------------------------------------------------------------- create
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateValuesRequest {
     pub index: usize,
@@ -884,7 +918,8 @@ pub async fn create_values(
     }))
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionQuery {
     pub input: String,
@@ -894,7 +929,8 @@ pub async fn path_completions(Query(query): Query<CompletionQuery>) -> Json<Vec<
     Json(blocking(move || path_suggestions_for_input(&query.input)).await)
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRunRequest {
     pub index: usize,
@@ -930,7 +966,8 @@ pub async fn run_create(
 
 // --------------------------------------------------------------------- tags
 
-#[derive(Deserialize, TS)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TagsRequest {
     pub path: String,
@@ -960,14 +997,15 @@ pub async fn tag_suggestions(State(app): AppState) -> Json<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::progress::Progress;
+    use crate::web::progress::Progress;
+    use ts_rs::TS;
 
     /// Write the TypeScript types that `ui/src/api/` imports. Run
-    /// `cargo test -p navgator-web` after an API change and commit the result.
+    /// `cargo test` after an API change and commit the result.
     #[test]
     fn export_typescript_bindings() {
         let config = ts_rs::Config::new()
-            .with_out_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/ui/src/api"))
+            .with_out_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/web/ui/src/api"))
             .with_large_int("number");
         type Export = fn(&ts_rs::Config) -> Result<(), ts_rs::ExportError>;
         let exports: [Export; 30] = [
@@ -993,7 +1031,7 @@ mod tests {
             CompletionQuery::export_all,
             PathSuggestion::export_all,
             CreateRunRequest::export_all,
-            navgator::create::MissingCreateValue::export_all,
+            crate::create::MissingCreateValue::export_all,
             TagsRequest::export_all,
             Progress::export_all,
             SortMode::export_all,

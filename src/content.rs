@@ -362,7 +362,7 @@ fn build_preview_text(path: &str, accent: Color, muted: Color, text: Color) -> T
 
 /// Git facts for one preview tab. Both UIs render it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct GitSummary {
     /// The selected project is a bare repository (container layout).
@@ -378,7 +378,7 @@ pub struct GitSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct GitSummaryWorktree {
     pub label: String,
     pub path: String,

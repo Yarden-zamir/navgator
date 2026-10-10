@@ -102,6 +102,21 @@ fn main() -> AppResult<()> {
             &config_entries,
         );
     }
+    if args[0] == "web" {
+        let options = match parse_web_args(&args[1..], config_entries) {
+            Ok(options) => options,
+            Err(error) => {
+                eprintln!("{error}");
+                print_usage();
+                std::process::exit(2);
+            }
+        };
+        if let Err(error) = navgator::web::run(options) {
+            eprintln!("navgator web: {error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     if args[0] == "onboarding" || args[0] == "--onboarding" {
         reject_config_entries(&config_entries);
         ensure_tty_stdin()?;
@@ -147,13 +162,17 @@ Commands:
                            (alias: action-picker)
   create [RECIPE] [PATH]   Open the create picker, or run a recipe directly by
                            label or slug, e.g. `create new-project` (alias: new)
+  web [--port PORT] [--no-open]
+                           Open the navigator in the browser. Starts the local
+                           server on 127.0.0.1 (default port 4747) unless it
+                           already runs; a started server stays in the foreground
   onboarding               Interactive walkthrough: creates a starter config and
                            sets up zsh shortcuts (alias: --onboarding)
   config-schema            Print the JSON config schema to stdout (alias: schema)
   help                     Show this help (aliases: --help, -h)
   version                  Show the version (aliases: --version, -V)
 
-Options (interactive commands only):
+Options (interactive commands and `web`):
   --config-entry TOML      Override one config entry for this invocation with a
                            TOML dotted assignment; repeatable, applied in order.
                            Example: --config-entry 'sort.default=\"alpha-asc\"'
@@ -193,6 +212,31 @@ fn split_config_entries(args: &[String]) -> Result<(Vec<String>, Vec<String>), S
         index += 1;
     }
     Ok((positional, entries))
+}
+
+fn parse_web_args(
+    args: &[String],
+    config_entries: Vec<String>,
+) -> Result<navgator::web::WebOptions, String> {
+    let mut options = navgator::web::WebOptions {
+        port: navgator::web::DEFAULT_PORT,
+        open: true,
+        config_entries,
+    };
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--no-open" => options.open = false,
+            "--port" => {
+                let value = args.next().ok_or("--port requires a value")?;
+                options.port = value
+                    .parse()
+                    .map_err(|_| format!("--port expects a port number, got {value:?}"))?;
+            }
+            other => return Err(format!("unknown `web` argument: {other}")),
+        }
+    }
+    Ok(options)
 }
 
 fn reject_config_entries(entries: &[String]) {
@@ -3543,6 +3587,8 @@ mod tests {
             "action-picker",
             "create",
             "new",
+            "web",
+            "--no-open",
             "onboarding",
             "--onboarding",
             "config-schema",
@@ -3556,6 +3602,25 @@ mod tests {
             assert!(help.contains(name), "help text is missing `{name}`");
         }
         assert!(help.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn web_opens_the_browser_on_the_default_port() {
+        let options = parse_web_args(&[], vec!["sort.default=\"match\"".to_string()])
+            .expect("no arguments are valid");
+        assert_eq!(options.port, navgator::web::DEFAULT_PORT);
+        assert!(options.open);
+        assert_eq!(options.config_entries.len(), 1);
+    }
+
+    #[test]
+    fn web_accepts_port_and_no_open() {
+        let args = ["--port", "5000", "--no-open"].map(String::from);
+        let options = parse_web_args(&args, Vec::new()).expect("valid arguments");
+        assert_eq!(options.port, 5000);
+        assert!(!options.open);
+        assert!(parse_web_args(&["--port".to_string()], Vec::new()).is_err());
+        assert!(parse_web_args(&["--open".to_string()], Vec::new()).is_err());
     }
 
     #[test]

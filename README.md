@@ -1,6 +1,6 @@
 # navgator
 
-🐊 Rust TUI project navigator with Git worktree and preview support. The same navigator also runs as a local web app (`navgator-web`).
+🐊 Rust TUI project navigator with Git worktree and preview support. The same navigator also runs as a local web app (`navgator web`).
 
 Nerd Font is required for gator-family CLIs so built-in icons render correctly; the Homebrew formula's caveats suggest one.
 
@@ -222,14 +222,17 @@ Terminal launch selectors match recipe labels directly or by slug, so `New proje
 
 ## Web App
 
-`navgator-web` serves the navigator as a page on `http://127.0.0.1:4747`. It reads the same config, caches, tags and usage history as the terminal UI.
+`navgator web` opens the navigator as a page on `http://127.0.0.1:4747`. It reads the same config, caches, tags and usage history as the terminal UI.
 
 ```sh
-cargo build --release
-target/release/navgator-web --open
+navgator web
 ```
 
-Options: `--port PORT`, `--open` (opens the default browser), and `--config-entry TOML` (repeatable, as for `navgator`).
+- If the local server does not run yet, the command starts it in the foreground and opens the page. Ctrl+C stops the server.
+- If the server runs already, the command only opens the page and exits. Thus it is safe to bind to a shortcut or a launcher.
+- If another program uses the port, the command fails; pick another port.
+
+Options: `--port PORT`, `--no-open` (start or find the server, do not open a browser), and `--config-entry TOML` (repeatable, as for the terminal UI).
 
 Differences from the terminal UI:
 
@@ -248,13 +251,13 @@ Security: the server listens on `127.0.0.1` only. It rejects requests whose `Hos
 ```sh
 cd web/ui
 npm install
-npm run dev          # hot reload on :5173, proxies the API to a running navgator-web
+npm run dev          # hot reload on :5173, proxies the API to a running `navgator web`
 npm run typecheck
 ```
 
 `cargo build` runs `npm run build` in `web/ui` when `web/ui/node_modules` exists and embeds `web/ui/dist` in the binary. Without `node_modules`, the binary serves a "UI not built" page.
 
-The TypeScript API types in `web/ui/src/api/` come from the Rust structs. After an API change, run `cargo test -p navgator-web` and commit the regenerated files.
+The TypeScript API types in `web/ui/src/api/` come from the Rust structs. After an API change, run `cargo test` and commit the regenerated files.
 
 ## Build
 
@@ -262,7 +265,7 @@ The TypeScript API types in `web/ui/src/api/` come from the Rust structs. After 
 cargo build --release
 ```
 
-This builds both binaries: `target/release/navgator` and `target/release/navgator-web`.
+A release build embeds the web UI only when `web/ui/node_modules` exists. Run `npm ci` in `web/ui` first.
 
 ## Check
 

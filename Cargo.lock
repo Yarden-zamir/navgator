@@ -952,33 +952,21 @@ name = "navgator"
 version = "0.5.1"
 dependencies = [
  "ansi-to-tui",
+ "axum",
  "crossterm",
  "figment",
  "gator",
  "libc",
- "ratatui",
- "schemars",
- "serde",
- "serde_json",
- "ts-rs",
- "tui-input",
-]
-
-[[package]]
-name = "navgator-web"
-version = "0.1.0"
-dependencies = [
- "axum",
- "gator",
- "navgator",
  "pulldown-cmark",
  "ratatui",
  "rust-embed",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
  "tokio-stream",
  "ts-rs",
+ "tui-input",
 ]
 
 [[package]]

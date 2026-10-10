@@ -1,4 +1,4 @@
-//! The built UI (`ui/dist`) is embedded in the binary.
+//! The built UI (`web/ui/dist`) is embedded in the binary.
 
 use axum::{
     body::Body,
@@ -8,7 +8,7 @@ use axum::{
 use rust_embed::Embed;
 
 #[derive(Embed)]
-#[folder = "ui/dist"]
+#[folder = "web/ui/dist"]
 #[allow_missing = true]
 struct Assets;
 
@@ -20,7 +20,7 @@ pub async fn serve(uri: Uri) -> Response {
             Some(file) => ("index.html", file),
             None => return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                "navgator-web was built without its UI. Run `npm install` in web/ui, then rebuild.",
+                "navgator was built without its web UI. Run `npm install` in web/ui, then rebuild navgator.",
             )
                 .into_response(),
         },

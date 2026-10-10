@@ -1,7 +1,6 @@
 [package]
 name = "navgator"
 version = "0.5.1"
-default-run = "navgator"
 edition = "2021"
 description = "🐊 Rust TUI project navigator with Git worktree and preview support"
 license = "MIT"
@@ -11,21 +10,21 @@ categories = ["command-line-interface", "development-tools"]
 
 [dependencies]
 ansi-to-tui = "8.0"
+axum = "0.8.9"
 crossterm = "0.29"
 figment = { version = "0.10", features = ["toml"] }
 gator = { git = "https://github.com/Yarden-zamir/gator", branch = "main" }
 libc = "0.2"
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 ratatui = "0.30"
+rust-embed = { version = "8.13.0", features = ["mime-guess"] }
 schemars = { version = "0.8", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 tui-input = { version = "0.15", features = ["crossterm"] }
-ts-rs = { version = "12.0.1", optional = true }
 
-[features]
-# TypeScript bindings for the types that the web API sends (used by navgator-web).
-ts = ["dep:ts-rs"]
-
-[workspace]
-members = [".", "web"]
-default-members = [".", "web"]
+[dev-dependencies]
+# `cargo test` writes the web API types to web/ui/src/api/.
+ts-rs = "12.0.1"

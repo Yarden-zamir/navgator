@@ -3,10 +3,10 @@
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use serde::Serialize;
-use ts_rs::TS;
 
 /// One run of text with the color that `erd` gave it.
-#[derive(Serialize, TS)]
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct StyledSegment {
     pub text: String,
     /// A CSS color value, or `None` for the default text color.

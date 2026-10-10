@@ -1,18 +1,18 @@
-//! Build the web UI into `ui/dist` before the binary embeds it.
+//! Build the web UI into `web/ui/dist` before the binary embeds it.
 //!
-//! The build runs only when `ui/node_modules` exists, so CI and other machines
+//! The build runs only when `web/ui/node_modules` exists, so CI and other machines
 //! without Node still compile. Such a binary serves a "UI not built" error page.
 
 use std::{path::Path, process::Command};
 
 fn main() {
-    println!("cargo:rerun-if-changed=ui/src");
-    println!("cargo:rerun-if-changed=ui/index.html");
-    println!("cargo:rerun-if-changed=ui/package.json");
-    println!("cargo:rerun-if-changed=ui/vite.config.ts");
-    println!("cargo:rerun-if-changed=ui/node_modules");
+    println!("cargo:rerun-if-changed=web/ui/src");
+    println!("cargo:rerun-if-changed=web/ui/index.html");
+    println!("cargo:rerun-if-changed=web/ui/package.json");
+    println!("cargo:rerun-if-changed=web/ui/vite.config.ts");
+    println!("cargo:rerun-if-changed=web/ui/node_modules");
 
-    let ui = Path::new("ui");
+    let ui = Path::new("web/ui");
     if !ui.join("node_modules").is_dir() {
         println!("cargo:warning=web/ui/node_modules is missing; run `npm install` in web/ui to embed the UI");
         return;
