@@ -70,8 +70,34 @@
   --border: var(--theme-border-width) solid var(--app-theme-border);
 }
 
+/*
+ * Nerd Font icons in every font: this face covers only the icon code points
+ * (Symbols Nerd Font v3.5.1, MIT, see fonts/SymbolsNerdFont-LICENSE). Letters
+ * still come from the theme fonts after it in each stack.
+ */
+@font-face {
+  font-family: "navgator icons";
+  src: url("/fonts/SymbolsNerdFont.woff2") format("woff2");
+  font-display: block;
+  unicode-range: U+E000-F8FF, U+F0001-F1AF0, U+23FB-23FE, U+2630, U+2665, U+26A1, U+276C-2771, U+2B58;
+}
+
 * {
   box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Browsers give these their own monospace font; use the theme one. */
+code,
+kbd,
+samp {
+  font-family: "navgator icons", var(--font-code);
 }
 
 html,
@@ -86,13 +112,13 @@ body {
   background-image: radial-gradient(var(--theme-canvas-pattern-color) 1px, transparent 1px);
   background-size: 16px 16px;
   color: var(--app-theme-text);
-  font-family: var(--font-sans);
+  font-family: "navgator icons", var(--font-sans);
   font-size: 14px;
 }
 
 .fatal {
   padding: 2rem;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   color: var(--app-theme-error);
 }
 
@@ -104,22 +130,51 @@ body {
   padding: 14px 14px 10px;
 }
 
+/* App sets the track sizes from the splitter positions. */
 .layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 2fr) minmax(360px, 3fr);
-  gap: 14px;
 }
 
 .side {
   min-height: 0;
   display: grid;
   grid-template-rows: 1fr;
-  gap: 14px;
 }
 
-.layout[data-detail="true"] .side {
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+.splitter {
+  position: relative;
+  touch-action: none;
+}
+
+.splitter[data-direction="columns"] {
+  cursor: col-resize;
+}
+
+.splitter[data-direction="rows"] {
+  cursor: row-resize;
+}
+
+.splitter::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: var(--app-theme-border);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.splitter[data-direction="columns"]::after {
+  inset: 30% 5px;
+}
+
+.splitter[data-direction="rows"]::after {
+  inset: 5px 30%;
+}
+
+.splitter:hover::after,
+.splitter[data-dragging="true"]::after {
+  opacity: 0.5;
 }
 
 .panel {
@@ -165,9 +220,42 @@ body {
   color: var(--app-theme-error);
 }
 
+.search-box {
+  position: relative;
+  display: flex;
+  margin: 10px 10px 6px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--app-theme-text-muted);
+  pointer-events: none;
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0 7px;
+  font-size: 17px;
+  color: var(--app-theme-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  color: var(--app-theme-error);
+}
+
 .search {
-  margin: 10px;
-  padding: 8px 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 32px 8px 32px;
   font: inherit;
   font-size: 15px;
   color: inherit;
@@ -179,6 +267,50 @@ body {
 
 .search:focus {
   box-shadow: 3px 3px 0 0 var(--app-theme-focus);
+}
+
+.results-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  font-size: 12px;
+}
+
+.toolbar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  border: 1.5px solid var(--app-theme-border);
+  border-radius: var(--radius);
+  background: var(--app-theme-surface);
+}
+
+.toolbar-field select {
+  font-size: 12px;
+  font-weight: 700;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.toggle-chip {
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-theme-text);
+  background: var(--app-theme-surface);
+  border: 1.5px solid var(--app-theme-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.toggle-chip[aria-pressed="true"] {
+  background: var(--app-theme-accent);
+  color: var(--app-theme-accent-foreground);
 }
 
 .rows {
@@ -200,6 +332,30 @@ body {
   white-space: nowrap;
 }
 
+.row:hover:not([aria-selected="true"]) {
+  background: var(--app-theme-surface-raised);
+  border-color: color-mix(in srgb, var(--app-theme-border) 25%, transparent);
+}
+
+.row-more {
+  visibility: hidden;
+  padding: 0 6px;
+  color: inherit;
+  background: none;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.row:hover .row-more,
+.row[aria-selected="true"] .row-more {
+  visibility: visible;
+}
+
+.row-more:hover {
+  border-color: currentColor;
+}
+
 .row[aria-selected="true"] {
   background: var(--app-theme-accent-surface);
   color: var(--app-theme-accent-surface-foreground);
@@ -212,7 +368,7 @@ body {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
 }
 
 .row[data-kind="remote-branch"] .row-name {
@@ -244,7 +400,7 @@ mark {
 
 .row-date {
   color: var(--app-theme-text-muted);
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 12px;
 }
 
@@ -365,7 +521,7 @@ pre,
 .tree,
 .path {
   margin: 0;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 12.5px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -419,7 +575,7 @@ pre,
 
 .worktrees {
   border-collapse: collapse;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 12.5px;
 }
 
@@ -468,39 +624,150 @@ pre,
 .help {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  justify-content: flex-end;
+  gap: 4px 6px;
   font-size: 12px;
+}
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: inherit;
+  background: none;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius);
+}
+
+button.hint {
+  cursor: pointer;
+}
+
+button.hint:hover {
+  border-color: var(--app-theme-border);
+  background: var(--app-theme-surface);
+}
+
+.footer-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.panel-buttons {
+  display: flex;
+  gap: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+  background: none;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: var(--app-theme-border);
+  background: var(--app-theme-surface);
+}
+
+.modal-close {
+  padding: 0 6px;
+  font-size: 16px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: var(--app-theme-error);
+}
+
+.keys-help {
+  columns: 2 260px;
+  column-gap: 24px;
+}
+
+.keys-help section {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+
+.keys-help h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.keys-help td {
+  padding: 1px 8px 1px 0;
+  font-size: 12.5px;
+}
+
+.keys-help tr[data-kind="configured"] td:last-child {
+  color: var(--app-theme-accent);
+  font-weight: 700;
+}
+
+.keys-help tr[data-kind="disabled"] td:last-child {
+  color: var(--app-theme-text-muted);
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 46px;
+  max-width: min(560px, 80vw);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  color: var(--app-theme-text);
+  background: var(--app-theme-surface-overlay);
+  border: var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--theme-shadow);
+  white-space: pre-wrap;
+  cursor: pointer;
+  animation: toast-in 160ms ease-out;
+}
+
+.toast[data-error="true"] {
+  background: var(--app-theme-error);
+  color: #ffffff;
 }
 
 kbd {
   display: inline-block;
   padding: 0 5px;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 11px;
   font-weight: 700;
   background: var(--app-theme-surface);
   border: 1.5px solid var(--app-theme-border);
   border-radius: var(--radius);
   box-shadow: 1.5px 1.5px 0 0 var(--app-theme-border);
-}
-
-.notice {
-  padding: 2px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  background: var(--app-theme-surface);
-  border: var(--border);
-  border-radius: var(--radius);
-  box-shadow: 2px 2px 0 0 var(--app-theme-border);
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.notice[data-error="true"] {
-  background: var(--app-theme-error);
-  color: #ffffff;
 }
 
 .backdrop {
@@ -540,7 +807,7 @@ kbd {
   margin-bottom: 8px;
   border: var(--border);
   border-radius: var(--radius);
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   min-height: 1.9em;
 }
 
@@ -568,7 +835,7 @@ kbd {
 
 .icon {
   width: 1.4em;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   text-align: center;
 }
 
@@ -597,7 +864,7 @@ kbd {
 
 .field input {
   font: inherit;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 13px;
   font-weight: 400;
   padding: 5px 8px;
@@ -616,7 +883,7 @@ kbd {
   border: var(--border);
   border-radius: var(--radius);
   padding: 4px;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 12.5px;
 }
 
@@ -651,7 +918,7 @@ kbd {
 /* ------------------------------------------------------------- settings */
 
 .mono {
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
 }
 
 .small-button {
@@ -804,7 +1071,7 @@ kbd {
 
 .settings-status[data-error="true"] {
   color: var(--app-theme-error);
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 12.5px;
 }
 
@@ -826,7 +1093,7 @@ kbd {
   min-width: 0;
   width: 100%;
   margin-bottom: 8px;
-  font-family: var(--font-sans);
+  font-family: "navgator icons", var(--font-sans);
 }
 
 .settings-nav a {
@@ -919,7 +1186,7 @@ kbd {
 }
 
 .field-key {
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 11.5px;
   color: var(--app-theme-text-muted);
 }
@@ -936,7 +1203,7 @@ kbd {
   min-width: 260px;
   max-width: 100%;
   padding: 4px 8px;
-  font-family: var(--font-code);
+  font-family: "navgator icons", var(--font-code);
   font-size: 12.5px;
   color: var(--app-theme-text);
   background: var(--app-theme-surface-raised);
