@@ -43,3 +43,16 @@
 30. A keybinding chord can be typed, or recorded from the next key press.
 31. Each keybinding context shows its built-in bindings. A click on one fills the chord to override it.
 32. The navigator loads the config again when the settings page closes.
+
+## Web Additions
+
+33. The page bundles the Symbols Nerd Font for the icon code points only, so icons show in every font and on machines without a Nerd Font.
+34. A double click, a right-click or the "⋯" button on a row opens the action picker for that row.
+35. The results toolbar selects the sort mode and turns remote branches on or off.
+36. The preview header copies the path, opens the GitHub page of the `origin` remote, and opens the action picker.
+37. A drag on the line between two panels resizes them. The page keeps the sizes in local storage. A double click on the line restores the default size.
+38. A click on a footer key hint runs the same action as the key.
+39. F1 or the "Keys" button lists every binding of every context.
+40. A click on the backdrop or the × button closes an overlay. A running task cannot close.
+41. Notices show as toasts. A click dismisses a toast.
+42. The page title names the selected result.

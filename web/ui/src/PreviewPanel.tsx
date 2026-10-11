@@ -29,6 +29,11 @@ type PreviewProps = {
   onTagEdit: (edit: TagEdit) => void;
   onSaveTags: () => void;
   onCancelTags: () => void;
+  /// The path of the active tab, shown in the header.
+  path: string | null;
+  githubUrl: string | null;
+  onCopyPath: () => void;
+  onActions: () => void;
 };
 
 export function PreviewPanel(props: PreviewProps) {
@@ -36,6 +41,22 @@ export function PreviewPanel(props: PreviewProps) {
     <section className="panel preview" data-focused={props.focused} onMouseDown={props.onFocus}>
       <header className="panel-title">
         <span>{props.title}</span>
+        {props.path && (
+          <span className="panel-buttons">
+            <button type="button" className="icon-button" title={`Copy ${props.path}`} onClick={props.onCopyPath}>
+              {"\uf0c5"} Copy path
+            </button>
+            {props.githubUrl && (
+              // The server builds this URL from the origin remote; it is always https://github.com/.
+              <a className="icon-button" href={props.githubUrl} target="_blank" rel="noreferrer" title={props.githubUrl}>
+                {"\uf09b"} GitHub
+              </a>
+            )}
+            <button type="button" className="icon-button" title="Actions for this path" onClick={props.onActions}>
+              {"\uf0e7"} Actions
+            </button>
+          </span>
+        )}
       </header>
       {props.tabs.length > 1 && (
         <nav className="tabs">

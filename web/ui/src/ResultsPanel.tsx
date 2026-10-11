@@ -1,5 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { ResultRow } from "./api/ResultRow";
+import type { SortMode } from "./api/SortMode";
+import type { SortModeView } from "./api/SortModeView";
 import { Tag, queryHasTag } from "./Tag";
 
 type Props = {
@@ -10,11 +12,17 @@ type Props = {
   status: { text: string; tone: "normal" | "busy" | "error" } | null;
   focused: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
+  sortModes: SortModeView[];
+  sort: SortMode;
+  remotes: boolean;
   onQuery: (query: string) => void;
   onFocus: () => void;
   onSelect: (index: number) => void;
+  /// Open the action picker for the row.
   onActivate: (index: number) => void;
   onTagClick: (tag: string) => void;
+  onSort: (sort: SortMode) => void;
+  onToggleRemotes: () => void;
 };
 
 export function ResultsPanel(props: Props) {
@@ -35,26 +43,64 @@ export function ResultsPanel(props: Props) {
           </span>
         )}
       </header>
-      <input
-        ref={props.inputRef}
-        className="search"
-        value={props.query}
-        placeholder="Search projects  ·  @folder  #tag"
-        spellCheck={false}
-        autoComplete="off"
-        autoFocus
-        onChange={(event) => props.onQuery(event.target.value)}
-      />
+      <div className="search-box">
+        <span className="search-icon" aria-hidden>
+          {""}
+        </span>
+        <input
+          ref={props.inputRef}
+          className="search"
+          value={props.query}
+          placeholder="Search projects  ·  @folder  #tag"
+          spellCheck={false}
+          autoComplete="off"
+          autoFocus
+          onChange={(event) => props.onQuery(event.target.value)}
+        />
+        {props.query && (
+          <button type="button" className="search-clear" title="Clear the search" onClick={() => props.onQuery("")}>
+            ×
+          </button>
+        )}
+      </div>
+      <div className="results-toolbar">
+        <label className="toolbar-field" title="Sort mode">
+          <span aria-hidden>{""}</span>
+          <select value={props.sort} onChange={(event) => props.onSort(event.target.value as SortMode)}>
+            {props.sortModes.map((mode) => (
+              <option key={mode.id} value={mode.id}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="toggle-chip"
+          aria-pressed={props.remotes}
+          title="Show the remote branches of the selected repo"
+          onClick={props.onToggleRemotes}
+        >
+          {""} Remote branches
+        </button>
+      </div>
       <ol className="rows" ref={listRef}>
-        {props.rows.length === 0 && <li className="empty">No matches</li>}
+        {props.rows.length === 0 && (
+          <li className="empty">{props.query ? `Nothing matches "${props.query}"` : "No results"}</li>
+        )}
         {props.rows.map((row, index) => (
           <li
             key={row.id}
             className="row"
             data-kind={row.kind}
             aria-selected={index === props.selectedIndex}
+            title={row.metadataPath}
             onClick={() => props.onSelect(index)}
             onDoubleClick={() => props.onActivate(index)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              props.onActivate(index);
+            }}
           >
             <span className="row-name">
               {row.display.map((run, runIndex) =>
@@ -78,6 +124,17 @@ export function ResultsPanel(props: Props) {
               </span>
             )}
             <span className="row-date">{row.date ?? ""}</span>
+            <button
+              type="button"
+              className="row-more"
+              title="Actions (or right-click the row)"
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onActivate(index);
+              }}
+            >
+              {""}
+            </button>
           </li>
         ))}
       </ol>

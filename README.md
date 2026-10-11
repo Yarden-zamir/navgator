@@ -242,7 +242,7 @@ Differences from the terminal UI:
 - After a create recipe, the action picker opens for the new path.
 - The current working directory is not pinned to the top.
 
-The "Settings" button (or `#settings` in the URL) opens a form for the user config file. The form comes from the config schema and has path completion, action id completion and key recording. A save keeps your comments, and the server loads the new config at once. The TOML view edits the file text. A click on a tag filters the results by that tag.
+The "Settings" button (or `#settings` in the URL) opens a form for the user config file. The form comes from the config schema and has path completion, action id completion and key recording. A save keeps your comments, and the server loads the new config at once. The TOML view edits the file text. A click on a tag filters the results by that tag. Panels resize by drag, a right-click on a row opens its actions, and F1 lists every key binding.
 
 The full behavior is in [docs/web-app-spec.md](docs/web-app-spec.md).
 

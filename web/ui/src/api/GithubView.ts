@@ -5,4 +5,8 @@ export type GithubView = { summary: GithubRepoSummary | null,
 /**
  * README rendered to HTML. Raw HTML in the README is dropped.
  */
-readmeHtml: string | null, };
+readmeHtml: string | null, 
+/**
+ * The `https://github.com/owner/repo` page of the `origin` remote.
+ */
+url: string | null, };

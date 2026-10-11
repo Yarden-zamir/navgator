@@ -10,11 +10,12 @@ import type { ResultRow } from "./api/ResultRow";
 import type { Results } from "./api/Results";
 import type { SortMode } from "./api/SortMode";
 import { buildKeymap, coreAction } from "./keys";
-import { ActionPicker, CreateForm, CreatePicker, ProgressOverlay, type CreateFormState } from "./Overlays";
+import { ActionPicker, CreateForm, CreatePicker, KeysHelp, ProgressOverlay, type CreateFormState } from "./Overlays";
 import { DetailPanel, PreviewPanel, type DetailTab, type TagEdit } from "./PreviewPanel";
 import { openSettings } from "./SettingsPage";
 import { toggleTagFilter } from "./Tag";
 import { ResultsPanel } from "./ResultsPanel";
+import { Splitter, useStoredFraction } from "./Splitter";
 import { Cache, useCached } from "./useCached";
 
 type Focus = "search" | "preview" | "detail" | "tag-edit";
@@ -26,7 +27,8 @@ type Overlay =
   | { kind: "actions"; path: string; query: string; selected: number; visible: number[] }
   | { kind: "create-picker"; path: string | null; query: string; selected: number }
   | { kind: "create-form"; form: CreateFormState }
-  | { kind: "progress"; title: string; messages: string[]; error: string | null };
+  | { kind: "progress"; title: string; messages: string[]; error: string | null }
+  | { kind: "keys" };
 
 const FOCUS_CONTEXT: Record<Focus, BindingContext> = {
   search: "navigator",
@@ -221,10 +223,11 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
     [],
   );
 
-  const targetPath = async (): Promise<string | null> => {
-    if (!entry) return null;
-    const tab = effectiveFocus === "preview" || effectiveFocus === "detail" ? activeTab?.path : undefined;
-    return (await api.target(entry.id, tab)).path;
+  /** The path that actions use: the focused preview tab, else the row's own target. */
+  const targetPath = async (row: ResultRow | null = entry): Promise<string | null> => {
+    if (!row) return null;
+    const usesTab = row === entry && (effectiveFocus === "preview" || effectiveFocus === "detail");
+    return (await api.target(row.id, usesTab ? activeTab?.path : undefined)).path;
   };
 
   const progress = (title: string, first: string) => {
@@ -269,15 +272,15 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
   };
 
   /** Enter, the actions key and configured bindings: resolve the path, then act. */
-  const startTarget = async (target: TargetAction) => {
-    if (!entry) return;
+  const startTarget = async (target: TargetAction, row: ResultRow | null = entry) => {
+    if (!row) return;
     setStickToFirst(false);
-    setSelectedId(entry.id);
-    if (entry.kind === "remote-branch") {
+    setSelectedId(row.id);
+    if (row.kind === "remote-branch") {
       const verb = bootstrap.branchOnSelect === "worktree" ? "Creating" : "Checking out";
-      const status = progress(`${verb} ${entry.display.map((run) => run.text).join("")}`, "Starting");
+      const status = progress(`${verb} ${row.display.map((run) => run.text).join("")}`, "Starting");
       try {
-        const path = await streamProgress("/api/branches/select", { entryId: entry.id }, status.message);
+        const path = await streamProgress("/api/branches/select", { entryId: row.id }, status.message);
         caches.preview.clear();
         setOverlay(null);
         await dispatchTarget(target, path);
@@ -286,7 +289,7 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
       }
       return;
     }
-    const path = await targetPath();
+    const path = await targetPath(row);
     if (path) await dispatchTarget(target, path);
   };
 
@@ -471,6 +474,15 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
   };
 
   const handleOverlayKey = (event: KeyboardEvent, current: Overlay): void => {
+    if (current.kind === "keys") {
+      const action = coreAction(keymap.resolve("error-overlay", event));
+      if (event.key === "F1" || action === "cancel" || action === "back" || action === "dismiss-overlay") {
+        event.preventDefault();
+        setOverlay(null);
+      }
+      return;
+    }
+
     if (current.kind === "progress") {
       const target = keymap.resolve(current.error === null ? "progress-overlay" : "error-overlay", event);
       if (!target) return;
@@ -621,6 +633,12 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
   const handleKey = (event: KeyboardEvent): void => {
     if (event.isComposing) return;
     if (overlay) return handleOverlayKey(event, overlay);
+    // F1 is not a gator binding, so it cannot clash with the config keymap.
+    if (event.key === "F1") {
+      event.preventDefault();
+      setOverlay({ kind: "keys" });
+      return;
+    }
 
     const context = FOCUS_CONTEXT[effectiveFocus];
     const target = keymap.resolve(context, event);
@@ -811,6 +829,11 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
+  const selectedName = entry ? entry.display.map((run) => run.text).join("") : null;
+  useEffect(() => {
+    document.title = selectedName ? `${selectedName} · navgator` : "navgator";
+  }, [selectedName]);
+
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), notice.error ? 8000 : 3000);
@@ -840,17 +863,44 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           ? overlay.form.completions
             ? "create-completions"
             : "create-form"
-          : overlay.error === null
-            ? "progress-overlay"
-            : "error-overlay"
+          : overlay.kind === "keys" || overlay.error !== null
+            ? "error-overlay"
+            : "progress-overlay"
     : FOCUS_CONTEXT[effectiveFocus];
+  /** What a click on a help hint does; the same as its key. */
+  const clicks: Partial<Record<CoreAction, () => Promise<void> | void>> = overlay
+    ? overlay.kind === "progress" && overlay.error === null
+      ? {}
+      : { cancel: () => setOverlay(null), "dismiss-overlay": () => setOverlay(null) }
+    : {
+        navigate: () => startTarget({ kind: "actions" }),
+        actions: () => startTarget({ kind: "actions" }),
+        create: openCreate,
+        "copy-path": copyPath,
+        "delete-worktree": deleteWorktree,
+        "toggle-remotes": toggleRemotes,
+        "edit-tags": editTags,
+        "cycle-sort": cycleSort,
+        "move-right": () => setFocus("preview"),
+        "move-left": () => setFocus("search"),
+        confirm: async () => {
+          if (tagEdit) await confirmTags(tagEdit);
+        },
+        cancel: () => (tagEdit ? cancelTags() : setFocus("search")),
+      };
   const hint = (action: CoreAction, text: string): ReactNode => {
     const label = keymap.label(helpContext, action);
-    return label ? (
+    if (!label) return null;
+    const click = clicks[action];
+    return click ? (
+      <button type="button" className="hint" key={action} onClick={() => Promise.resolve(click()).catch(showError)}>
+        <kbd>{label}</kbd> {text}
+      </button>
+    ) : (
       <span className="hint" key={action}>
         <kbd>{label}</kbd> {text}
       </span>
-    ) : null;
+    );
   };
   const help: ReactNode[] =
     helpContext === "navigator" || helpContext === "preview" || helpContext === "detail"
@@ -881,10 +931,14 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
                   hint("cancel", "close"),
                 ]
               : helpContext === "error-overlay"
-                ? [hint("dismiss-overlay", "dismiss"), hint("back", "back")]
+                ? [hint("dismiss-overlay", overlay?.kind === "keys" ? "close" : "dismiss")]
                 : [];
 
   const footer = <div className="help">{help}</div>;
+
+  const [columns, setColumns] = useStoredFraction("navgator.split.columns", 0.4);
+  const [rowsSplit, setRowsSplit] = useStoredFraction("navgator.split.rows", 0.6);
+  const githubUrl = github?.state === "ready" ? (github.value?.url ?? null) : null;
   // Like the terminal UI: the name of the previewed project, then the tab filter.
   const previewRoot = previewData?.kind === "local" ? previewData.rootPath : entry?.metadataPath;
   const previewTitle = previewRoot
@@ -893,7 +947,11 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
 
   return (
     <div className="app">
-      <main className="layout" data-detail={detailTabs.length > 0}>
+      <main
+        className="layout"
+        data-detail={detailTabs.length > 0}
+        style={{ gridTemplateColumns: `minmax(280px, ${columns * 100}%) 14px minmax(320px, 1fr)` }}
+      >
         <ResultsPanel
           rows={rows}
           selectedIndex={selectedIndex}
@@ -910,11 +968,28 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           onSelect={selectIndex}
           onTagClick={filterByTag}
           onActivate={(index) => {
-            selectIndex(index);
-            startTarget({ kind: "actions" }).catch(showError);
+            const row = rows[index] ?? null;
+            setFocus("search");
+            startTarget({ kind: "actions" }, row).catch(showError);
           }}
+          sortModes={bootstrap.sortModes}
+          sort={sort}
+          remotes={remotes}
+          onSort={(mode) => {
+            setSort(mode);
+            setStickToFirst(true);
+          }}
+          onToggleRemotes={() => toggleRemotes().catch(showError)}
         />
-        <div className="side">
+        <Splitter direction="columns" initial={0.4} onChange={setColumns} />
+        <div
+          className="side"
+          style={
+            detailTabs.length > 0
+              ? { gridTemplateRows: `minmax(0, ${rowsSplit * 100}%) 14px minmax(0, 1fr)` }
+              : undefined
+          }
+        >
           <PreviewPanel
             title={previewTitle}
             preview={preview}
@@ -939,7 +1014,12 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
             onTagEdit={setTagEdit}
             onSaveTags={() => tagEdit && confirmTags(tagEdit).catch(showError)}
             onCancelTags={cancelTags}
+            path={activeTab?.path ?? entry?.metadataPath ?? null}
+            githubUrl={githubUrl}
+            onCopyPath={() => copyPath().catch(showError)}
+            onActions={() => startTarget({ kind: "actions" }).catch(showError)}
           />
+          {detailTabs.length > 0 && <Splitter direction="rows" initial={0.6} onChange={setRowsSplit} />}
           <DetailPanel
             tabs={detailTabs}
             activeIndex={Math.min(detailIndex, Math.max(detailTabs.length - 1, 0))}
@@ -951,16 +1031,21 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
         </div>
       </main>
       <footer className="footer">
-        <button type="button" className="small-button" title="Edit the navgator config" onClick={openSettings}>
-          ⚙ Settings
-        </button>
+        <span className="footer-buttons">
+          <button type="button" className="small-button" title="Edit the navgator config" onClick={openSettings}>
+            {"\uf013"} Settings
+          </button>
+          <button type="button" className="small-button" title="All key bindings (F1)" onClick={() => setOverlay({ kind: "keys" })}>
+            {"\uf11c"} Keys
+          </button>
+        </span>
         {!overlay && footer}
-        {notice && (
-          <span className="notice" data-error={notice.error}>
-            {notice.text}
-          </span>
-        )}
       </footer>
+      {notice && (
+        <button type="button" className="toast" data-error={notice.error} title="Dismiss" onClick={() => setNotice(null)}>
+          <span aria-hidden>{notice.error ? "\uf071" : "\uf00c"}</span> {notice.text}
+        </button>
+      )}
 
       {overlay?.kind === "actions" && (
         <ActionPicker
@@ -969,6 +1054,7 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           selected={overlay.selected}
           query={overlay.query}
           footer={footer}
+          onClose={() => setOverlay(null)}
           onPick={(index) => {
             const view = bootstrap.actions[overlay.visible[index] ?? -1];
             if (view) runAction({ by: "index", index: view.index }, overlay.path, view.label).catch(showError);
@@ -981,6 +1067,7 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           selected={overlay.selected}
           query={overlay.query}
           footer={footer}
+          onClose={() => setOverlay(null)}
           onPick={(index) => {
             const item = filterCreates(bootstrap, overlay.query)[index];
             if (item) openCreateForm(item.index, overlay.path).catch(showError);
@@ -992,6 +1079,7 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           item={createItem(overlay.form)}
           form={overlay.form}
           footer={footer}
+          onClose={() => setOverlay(null)}
           onInput={(value) => {
             const form = overlay.form;
             const values = form.values.map((current, index) => (index === form.active ? value : current));
@@ -1008,7 +1096,16 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
         />
       )}
       {overlay?.kind === "progress" && (
-        <ProgressOverlay title={overlay.title} messages={overlay.messages} error={overlay.error} footer={footer} />
+        <ProgressOverlay
+          title={overlay.title}
+          messages={overlay.messages}
+          error={overlay.error}
+          footer={footer}
+          onClose={() => setOverlay(null)}
+        />
+      )}
+      {overlay?.kind === "keys" && (
+        <KeysHelp keymap={bootstrap.keymap} actions={bootstrap.actions} footer={footer} onClose={() => setOverlay(null)} />
       )}
     </div>
   );

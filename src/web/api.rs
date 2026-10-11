@@ -19,7 +19,7 @@ use crate::git::{
     git_command_dir_for_path, git_is_bare_repository, remove_worktree_safely_with_progress,
     selectable_worktree_path_for_project,
 };
-use crate::github::{github_content_for_path, GithubRepoSummary};
+use crate::github::{github_content_for_path, github_url_for_path, GithubRepoSummary};
 use crate::metadata::{format_date_display, format_epoch_minutes};
 use crate::model::keybindings::{BindingContext, BindingTarget, CoreAction};
 use crate::model::{
@@ -618,6 +618,8 @@ pub struct GithubView {
     pub summary: Option<GithubRepoSummary>,
     /// README rendered to HTML. Raw HTML in the README is dropped.
     pub readme_html: Option<String>,
+    /// The `https://github.com/owner/repo` page of the `origin` remote.
+    pub url: Option<String>,
 }
 
 pub async fn github(Query(query): Query<PathQuery>) -> Json<Option<GithubView>> {
@@ -627,6 +629,7 @@ pub async fn github(Query(query): Query<PathQuery>) -> Json<Option<GithubView>> 
                 (content.summary.is_some() || content.readme.is_some()).then(|| GithubView {
                     summary: content.summary,
                     readme_html: content.readme.as_deref().map(markdown_to_html),
+                    url: github_url_for_path(Path::new(&query.path)),
                 })
             })
         })

@@ -1,14 +1,29 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import type { ActionView } from "./api/ActionView";
 import type { CreateView } from "./api/CreateView";
+import type { KeyContext } from "./api/KeyContext";
+import type { KeyTarget } from "./api/KeyTarget";
 import type { PathSuggestion } from "./api/PathSuggestion";
 
-function Modal({ title, children, footer }: { title: string; children: ReactNode; footer: ReactNode }) {
+/// `onClose` is null while the overlay cannot close, for example during a
+/// running task.
+function Modal(props: { title: string; children: ReactNode; footer: ReactNode; onClose: (() => void) | null }) {
+  const { title, children, footer, onClose } = props;
   return (
-    <div className="backdrop">
+    <div
+      className="backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose?.();
+      }}
+    >
       <div className="modal" role="dialog" aria-label={title}>
         <header className="panel-title">
           <span>{title}</span>
+          {onClose && (
+            <button type="button" className="modal-close" title="Close" onClick={onClose}>
+              ×
+            </button>
+          )}
         </header>
         <div className="modal-body">{children}</div>
         <footer className="modal-footer">{footer}</footer>
@@ -58,9 +73,10 @@ export function ActionPicker(props: {
   query: string;
   footer: ReactNode;
   onPick: (index: number) => void;
+  onClose: () => void;
 }) {
   return (
-    <Modal title={`Actions · ${props.path}`} footer={props.footer}>
+    <Modal title={`Actions · ${props.path}`} footer={props.footer} onClose={props.onClose}>
       <PickerList
         items={props.actions.map((action) => ({
           key: String(action.index),
@@ -82,9 +98,10 @@ export function CreatePicker(props: {
   query: string;
   footer: ReactNode;
   onPick: (index: number) => void;
+  onClose: () => void;
 }) {
   return (
-    <Modal title="Create" footer={props.footer}>
+    <Modal title="Create" footer={props.footer} onClose={props.onClose}>
       <PickerList
         items={props.items.map((item) => ({ key: String(item.index), icon: item.icon, label: item.label }))}
         selected={props.selected}
@@ -114,13 +131,14 @@ export function CreateForm(props: {
   onInput: (value: string) => void;
   onActivate: (prompt: number) => void;
   onPickSuggestion: (index: number) => void;
+  onClose: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     inputRef.current?.focus();
   }, [props.form.active]);
   return (
-    <Modal title={`${props.item.icon ?? ""} ${props.item.label}`.trim()} footer={props.footer}>
+    <Modal title={`${props.item.icon ?? ""} ${props.item.label}`.trim()} footer={props.footer} onClose={props.onClose}>
       <div className="create-form">
         <div className="fields">
           {props.item.prompts.map((prompt, index) => (
@@ -176,9 +194,10 @@ export function ProgressOverlay(props: {
   messages: string[];
   error: string | null;
   footer: ReactNode;
+  onClose: () => void;
 }) {
   return (
-    <Modal title={props.title} footer={props.footer}>
+    <Modal title={props.title} footer={props.footer} onClose={props.error === null ? null : props.onClose}>
       <div className="progress" data-error={props.error !== null}>
         {props.messages.map((message, index) => (
           <pre key={index}>{message}</pre>
@@ -188,6 +207,41 @@ export function ProgressOverlay(props: {
         ) : (
           <pre className="error-text">{props.error}</pre>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+function targetText(target: KeyTarget, actions: ActionView[]): string {
+  if (target.kind === "disabled") return "(off)";
+  if (target.kind === "core") return target.action.replaceAll("-", " ");
+  return actions.find((action) => action.id === target.id)?.label ?? target.id;
+}
+
+/// Every binding of every context, from the keymap that the config builds.
+export function KeysHelp(props: { keymap: KeyContext[]; actions: ActionView[]; footer: ReactNode; onClose: () => void }) {
+  return (
+    <Modal title="Keys" footer={props.footer} onClose={props.onClose}>
+      <div className="keys-help">
+        {props.keymap
+          .filter((context) => context.bindings.length > 0)
+          .map((context) => (
+            <section key={context.context}>
+              <h3>{context.context.replaceAll("-", " ")}</h3>
+              <table>
+                <tbody>
+                  {context.bindings.map((binding) => (
+                    <tr key={binding.chord} data-kind={binding.target.kind}>
+                      <td>
+                        <kbd>{binding.label}</kbd>
+                      </td>
+                      <td>{targetText(binding.target, props.actions)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ))}
       </div>
     </Modal>
   );
