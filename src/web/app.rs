@@ -4,9 +4,9 @@
 use crate::metadata::spawn_bulk_metadata_fetch;
 use crate::model::keybindings::Keymap;
 use crate::model::{
-    ActionSettings, BranchSettings, CreateSettings, MetaResult, NavigateEntry, NavigateEntryKind,
-    PreviewSettings, RemoteSettings, ResultUpdate, SortMeta, SortMode, SortSettings, TagResult,
-    DATE_PLACEHOLDER,
+    ActionSettings, BranchSettings, BuildItemsResult, CreateSettings, MetaResult, NavigateEntry,
+    NavigateEntryKind, PreviewSettings, RemoteSettings, ResultUpdate, SortMeta, SortMode,
+    SortSettings, TagResult, DATE_PLACEHOLDER,
 };
 use crate::results::{
     build_items_with_config_entries, spawn_remote_branch_result_provider,
@@ -16,14 +16,12 @@ use crate::tags::spawn_bulk_tag_fetch;
 use crate::usage::AccessHistory;
 use std::{
     collections::{HashMap, HashSet},
-    sync::{mpsc, Arc, Mutex, MutexGuard},
+    sync::{mpsc, Arc, Mutex, MutexGuard, RwLock},
     thread,
 };
 use tokio::sync::broadcast;
 
-/// Config values that stay fixed while the server runs.
-// Limit: config edits need a server restart. Revisit if config edits become
-// frequent enough that a reload endpoint pays off.
+/// Config values from the last config load. `App::reload` replaces them.
 pub struct Settings {
     pub config_entries: Vec<String>,
     pub preview: PreviewSettings,
@@ -53,8 +51,23 @@ pub struct Store {
     tags_in_flight: HashSet<String>,
 }
 
+impl Settings {
+    fn new(config_entries: Vec<String>, built: &BuildItemsResult) -> Self {
+        Self {
+            config_entries,
+            preview: built.preview_settings,
+            remote: built.remote_settings,
+            branch: built.branch_settings,
+            actions: built.action_settings.clone(),
+            create: built.create_settings.clone(),
+            keymap: built.keymap.clone(),
+            default_sort: built.sort_settings.default_mode,
+        }
+    }
+}
+
 pub struct App {
-    pub settings: Settings,
+    settings: RwLock<Arc<Settings>>,
     store: Mutex<Store>,
     changes: broadcast::Sender<()>,
     results_tx: mpsc::Sender<ResultUpdate>,
@@ -72,16 +85,7 @@ impl App {
         let (tag_tx, tag_rx) = mpsc::channel();
         let (changes, _) = broadcast::channel(64);
         let app = Arc::new(Self {
-            settings: Settings {
-                config_entries,
-                preview: built.preview_settings,
-                remote: built.remote_settings,
-                branch: built.branch_settings,
-                actions: built.action_settings,
-                create: built.create_settings,
-                keymap: built.keymap,
-                default_sort: built.sort_settings.default_mode,
-            },
+            settings: RwLock::new(Arc::new(Settings::new(config_entries, &built))),
             store: Mutex::new(Store {
                 entries: Vec::new(),
                 sort_settings: built.sort_settings,
@@ -133,6 +137,15 @@ impl App {
             .expect("navgator web store mutex is poisoned")
     }
 
+    pub fn settings(&self) -> Arc<Settings> {
+        Arc::clone(
+            &self
+                .settings
+                .read()
+                .expect("navgator web settings lock is poisoned"),
+        )
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.changes.subscribe()
     }
@@ -159,21 +172,29 @@ impl App {
                 .retain(|candidate| !candidate.id.starts_with(REMOTE_BRANCH_PROVIDER_PREFIX));
             store.remote = RemoteStatus {
                 message: Some("loading local remotes...".to_string()),
-                fetching: self.settings.remote.refresh_on_toggle,
+                fetching: self.settings().remote.refresh_on_toggle,
                 error: false,
             };
         }
         self.notify();
-        spawn_remote_branch_result_provider(entry, self.results_tx.clone(), self.settings.remote);
+        spawn_remote_branch_result_provider(entry, self.results_tx.clone(), self.settings().remote);
     }
 
-    /// Re-read the project folders and rescan worktrees, for example after a
-    /// create recipe or a new worktree. Remote branch rows stay.
-    pub fn rescan(&self) -> Result<(), String> {
-        let built = build_items_with_config_entries(&self.settings.config_entries)
-            .map_err(|error| format!("failed to reload navgator entries: {error}"))?;
+    /// Reload the config, re-read the project folders and rescan worktrees,
+    /// for example after a config edit or a new worktree. Remote branch rows
+    /// stay.
+    pub fn reload(&self) -> Result<(), String> {
+        let config_entries = self.settings().config_entries.clone();
+        let built = build_items_with_config_entries(&config_entries)
+            .map_err(|error| format!("failed to load navgator config: {error}"))?;
+        *self
+            .settings
+            .write()
+            .expect("navgator web settings lock is poisoned") =
+            Arc::new(Settings::new(config_entries, &built));
         {
             let mut store = self.store();
+            store.sort_settings = built.sort_settings;
             let remote_entries = store
                 .entries
                 .drain(..)

@@ -110,6 +110,34 @@ pub enum CoreAction {
 }
 
 impl CoreAction {
+    pub const ALL: [Self; 25] = [
+        Self::Navigate,
+        Self::Actions,
+        Self::Create,
+        Self::Run,
+        Self::RunAndClose,
+        Self::Cancel,
+        Self::Back,
+        Self::Confirm,
+        Self::Accept,
+        Self::MoveUp,
+        Self::MoveDown,
+        Self::MoveLeft,
+        Self::MoveRight,
+        Self::PageUp,
+        Self::PageDown,
+        Self::MoveHome,
+        Self::MoveEnd,
+        Self::CopyPath,
+        Self::DeleteWorktree,
+        Self::ToggleRemotes,
+        Self::EditTags,
+        Self::CycleSort,
+        Self::ClearInput,
+        Self::RemoveLastTag,
+        Self::DismissOverlay,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         core_action_as_str(self)
     }
@@ -445,7 +473,7 @@ mod tests {
                 context.as_str()
             );
         }
-        for name in [
+        let names = [
             "navigate",
             "actions",
             "create",
@@ -471,8 +499,11 @@ mod tests {
             "clear-input",
             "remove-last-tag",
             "dismiss-overlay",
-        ] {
+        ];
+        assert_eq!(CoreAction::ALL.len(), names.len());
+        for name in names {
             let action = CoreAction::parse(name).expect("known core action");
+            assert!(CoreAction::ALL.contains(&action), "ALL misses {name}");
             assert_eq!(
                 serde_json::to_value(action).expect("action serializes"),
                 name

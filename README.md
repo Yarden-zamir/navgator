@@ -242,6 +242,10 @@ Differences from the terminal UI:
 - After a create recipe, the action picker opens for the new path.
 - The current working directory is not pinned to the top.
 
+The "Settings" button (or `#settings` in the URL) opens a form for the user config file. The form comes from the config schema and has path completion, action id completion and key recording. A save keeps your comments, and the server loads the new config at once. The TOML view edits the file text. A click on a tag filters the results by that tag.
+
+The full behavior is in [docs/web-app-spec.md](docs/web-app-spec.md).
+
 The page uses the CSS variables of T3 Code themes. When `~/.t3/userdata/settings.json` names a theme file in `~/.t3/userdata/themes/`, the page takes its colors, fonts, border width, radius and shadow.
 
 Security: the server listens on `127.0.0.1` only. It rejects requests whose `Host` is not this server (DNS rebinding) and non-GET requests from another origin. It sends no CORS headers.

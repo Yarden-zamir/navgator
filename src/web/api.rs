@@ -63,7 +63,7 @@ pub struct ErrorBody {
 }
 
 impl ApiError {
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(super) fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
@@ -77,7 +77,7 @@ impl ApiError {
         }
     }
 
-    fn internal(message: impl Into<String>) -> Self {
+    pub(super) fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: message.into(),
@@ -97,10 +97,10 @@ impl IntoResponse for ApiError {
     }
 }
 
-type ApiResult<T> = Result<Json<T>, ApiError>;
+pub(super) type ApiResult<T> = Result<Json<T>, ApiError>;
 
 /// Run blocking work (git, gh, the file system) off the async runtime.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+pub(super) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
     tokio::task::spawn_blocking(work)
         .await
         .expect("navgator web blocking task panicked")
@@ -206,7 +206,7 @@ pub struct CreatePromptView {
 }
 
 pub async fn bootstrap(State(app): AppState) -> Json<Bootstrap> {
-    let settings = &app.settings;
+    let settings = app.settings();
     let keymap = BindingContext::ORDERED
         .iter()
         .map(|&context| KeyContext {
@@ -527,7 +527,7 @@ pub struct RemotePreview {
 
 pub async fn preview(State(app): AppState, Query(query): Query<EntryQuery>) -> ApiResult<Preview> {
     let entry = entry_or_404(&app, &query.entry)?;
-    let shorten = app.settings.preview.shorten_worktree_tab_labels;
+    let shorten = app.settings().preview.shorten_worktree_tab_labels;
     Ok(Json(
         blocking(move || match &entry.kind {
             NavigateEntryKind::RemoteBranch {
@@ -683,7 +683,8 @@ pub struct ActionsQuery {
 
 /// Indexes into `Bootstrap.actions` that the picker shows for `path`.
 pub async fn actions(State(app): AppState, Query(query): Query<ActionsQuery>) -> Json<Vec<usize>> {
-    let actions = &app.settings.actions;
+    let settings = app.settings();
+    let actions = &settings.actions;
     Json(
         filtered_action_indexes(
             &actions.items,
@@ -731,7 +732,8 @@ pub async fn run_action(
     State(app): AppState,
     Json(request): Json<RunRequest>,
 ) -> ApiResult<RunResult> {
-    let items = &app.settings.actions.items;
+    let settings = app.settings();
+    let items = &settings.actions.items;
     let action = match &request.action {
         ActionRef::Index { index } => items.get(*index),
         ActionRef::Id { id } => items
@@ -848,7 +850,7 @@ pub async fn select_branch(
     else {
         return Err(ApiError::bad_request("Not a remote branch"));
     };
-    let behavior = app.settings.branch.on_select;
+    let behavior = app.settings().branch.on_select;
     Ok(stream_progress(move |progress| {
         let bare = Path::new(&bare_path);
         let result = match behavior {
@@ -863,7 +865,7 @@ pub async fn select_branch(
             }
         };
         if result.is_ok() {
-            app.rescan()?;
+            app.reload()?;
         }
         result
     }))
@@ -905,8 +907,8 @@ pub async fn create_values(
     State(app): AppState,
     Json(request): Json<CreateValuesRequest>,
 ) -> ApiResult<Vec<String>> {
-    let item = app
-        .settings
+    let settings = app.settings();
+    let item = settings
         .create
         .items
         .get(request.index)
@@ -945,7 +947,7 @@ pub async fn run_create(
     Json(request): Json<CreateRunRequest>,
 ) -> Result<Response, ApiError> {
     let item = app
-        .settings
+        .settings()
         .create
         .items
         .get(request.index)
@@ -959,7 +961,7 @@ pub async fn run_create(
     };
     Ok(stream_progress(move |progress| {
         let path = run_create_recipe(&item, request.path.as_deref(), &values, progress)?;
-        app.rescan()?;
+        app.reload()?;
         Ok(path)
     }))
 }
@@ -1008,7 +1010,7 @@ mod tests {
             .with_out_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/web/ui/src/api"))
             .with_large_int("number");
         type Export = fn(&ts_rs::Config) -> Result<(), ts_rs::ExportError>;
-        let exports: [Export; 30] = [
+        let exports: [Export; 33] = [
             Bootstrap::export_all,
             ErrorBody::export_all,
             ResultsQuery::export_all,
@@ -1039,6 +1041,9 @@ mod tests {
             BindingContext::export_all,
             KeyTarget::export_all,
             EntryKind::export_all,
+            crate::web::settings::SettingsView::export_all,
+            crate::web::settings::SettingsUpdate::export_all,
+            crate::web::settings::DefaultBinding::export_all,
         ];
         for export in exports {
             export(&config).expect("TypeScript bindings export");

@@ -23,6 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
+toml_edit = "0.25.17"
 tui-input = { version = "0.15", features = ["crossterm"] }
 
 [dev-dependencies]

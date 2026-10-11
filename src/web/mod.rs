@@ -7,6 +7,7 @@ mod assets;
 mod guard;
 mod progress;
 mod render;
+mod settings;
 mod theme;
 
 use axum::{
@@ -119,6 +120,7 @@ fn router(app: Arc<app::App>, port: u16) -> Router {
         .route("/api/paths", get(api::path_completions))
         .route("/api/tags", put(api::save_tags))
         .route("/api/tags/suggestions", get(api::tag_suggestions))
+        .route("/api/settings", get(settings::read).put(settings::update))
         .route("/theme.css", get(theme_css))
         .fallback(assets::serve)
         .with_state(app)

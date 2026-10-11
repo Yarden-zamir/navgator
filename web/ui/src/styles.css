@@ -647,3 +647,415 @@ kbd {
     background-position: -22.6px 0;
   }
 }
+
+/* ------------------------------------------------------------- settings */
+
+.mono {
+  font-family: var(--font-code);
+}
+
+.small-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-theme-text);
+  background: var(--app-theme-surface);
+  border: 1.5px solid var(--app-theme-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.small-button:hover:not(:disabled) {
+  background: var(--app-theme-surface-raised);
+}
+
+.small-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.small-button.primary {
+  background: var(--app-theme-accent-surface);
+  color: var(--app-theme-accent-surface-foreground);
+  box-shadow: 2px 2px 0 0 var(--app-theme-border);
+}
+
+.small-button.danger:hover:not(:disabled) {
+  color: var(--app-theme-error);
+  border-color: var(--app-theme-error);
+}
+
+.small-button[data-active="true"] {
+  background: var(--app-theme-accent);
+  color: var(--app-theme-accent-foreground);
+}
+
+.small-button.add {
+  align-self: flex-start;
+  border-style: dashed;
+}
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1.5px solid var(--app-theme-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.segmented button {
+  padding: 2px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-theme-text);
+  background: var(--app-theme-surface);
+  border: none;
+  border-right: 1.5px solid var(--app-theme-border);
+  cursor: pointer;
+}
+
+.segmented button:last-child {
+  border-right: none;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--app-theme-accent);
+  color: var(--app-theme-accent-foreground);
+}
+
+.badge {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-theme-text-muted);
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+}
+
+.badge.warning {
+  color: var(--app-theme-warning);
+}
+
+.settings-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.settings-header {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  overflow: visible;
+}
+
+.settings-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-title h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.settings-title code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-actions kbd {
+  font-size: 10px;
+}
+
+.settings-status {
+  margin: 0;
+  padding: 6px 12px;
+  font-weight: 700;
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--app-theme-surface);
+  color: var(--app-theme-accent);
+  white-space: pre-wrap;
+}
+
+.settings-status[data-error="true"] {
+  color: var(--app-theme-error);
+  font-family: var(--font-code);
+  font-size: 12.5px;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 14px;
+}
+
+.settings-nav {
+  gap: 2px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.settings-nav input {
+  min-width: 0;
+  width: 100%;
+  margin-bottom: 8px;
+  font-family: var(--font-sans);
+}
+
+.settings-nav a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  color: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.settings-nav a:hover {
+  background: var(--app-theme-surface-raised);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--app-theme-warning);
+}
+
+.settings-form {
+  padding: 4px 20px 40px;
+  overflow: auto;
+  display: block;
+}
+
+.settings-section {
+  padding: 14px 0 18px;
+  border-bottom: 1.5px dashed var(--app-theme-border);
+}
+
+.settings-section h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.settings-toml {
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: inherit;
+  resize: none;
+  outline: none;
+}
+
+.fields-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid transparent;
+}
+
+.field[data-set="true"] {
+  border-left-color: var(--app-theme-accent);
+}
+
+.field-header,
+.field.nested > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field.nested > summary {
+  cursor: pointer;
+}
+
+.field.nested[open] {
+  align-items: stretch;
+}
+
+.field-title {
+  font-weight: 700;
+}
+
+.field-key {
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--app-theme-text-muted);
+}
+
+.field-help {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 12.5px;
+  color: var(--app-theme-text-muted);
+}
+
+/* Config values are code-like, and icons need the Nerd Font. */
+.setting-input {
+  min-width: 260px;
+  max-width: 100%;
+  padding: 4px 8px;
+  font-family: var(--font-code);
+  font-size: 12.5px;
+  color: var(--app-theme-text);
+  background: var(--app-theme-surface-raised);
+  border: 1.5px solid var(--app-theme-border);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+textarea.setting-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.setting-input.narrow {
+  min-width: 0;
+  width: 120px;
+}
+
+.setting-input:focus {
+  border-color: var(--app-theme-focus);
+  box-shadow: 0 0 0 2px var(--app-theme-focus);
+}
+
+.setting-input[data-warning="true"] {
+  border-color: var(--app-theme-warning);
+}
+
+.list-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: stretch;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.list-row > .setting-input,
+.list-row > textarea {
+  flex: 1;
+}
+
+.map-row .chord-input,
+.map-row > .setting-input:first-child {
+  flex: 0 0 auto;
+}
+
+.chord-input {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.chord-input .setting-input {
+  min-width: 0;
+  width: 150px;
+}
+
+.item-buttons {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.item-buttons .small-button {
+  padding: 1px 7px;
+}
+
+.list-card {
+  border: 1.5px solid var(--app-theme-border);
+  border-radius: var(--radius);
+  background: var(--app-theme-surface);
+}
+
+.list-card > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  background: var(--app-theme-surface-raised);
+}
+
+.list-card[open] > summary {
+  border-bottom: 1.5px solid var(--app-theme-border);
+}
+
+.list-card-title {
+  font-weight: 700;
+}
+
+.list-card > .fields-group {
+  padding: 4px 6px 10px;
+}
+
+.default-bindings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.binding-chip {
+  padding: 0;
+  font: inherit;
+  color: var(--app-theme-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.binding-chip:hover {
+  color: var(--app-theme-accent);
+}
+
+.binding-chip[data-overridden="true"] {
+  text-decoration: line-through;
+}

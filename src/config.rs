@@ -159,26 +159,58 @@ impl ConfigLoadState {
 #[serde(deny_unknown_fields)]
 struct ConfigKeybindings {
     #[serde(default)]
+    #[schemars(
+        title = "Global",
+        description = "Keys in every context. Only cancel binds here."
+    )]
     global: Option<BTreeMap<String, String>>,
     #[serde(default)]
+    #[schemars(
+        title = "Navigator",
+        description = "The search input and the result list."
+    )]
     navigator: Option<BTreeMap<String, String>>,
     #[serde(default)]
+    #[schemars(title = "Preview", description = "The preview panel.")]
     preview: Option<BTreeMap<String, String>>,
     #[serde(default)]
+    #[schemars(title = "Detail", description = "The GitHub and Git detail panel.")]
     detail: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "tag-editor")]
+    #[schemars(
+        title = "Tag Editor",
+        description = "The tag editor in the preview panel."
+    )]
     tag_editor: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "action-picker")]
+    #[schemars(title = "Action Picker", description = "The action picker.")]
     action_picker: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "create-picker")]
+    #[schemars(title = "Create Picker", description = "The create recipe picker.")]
     create_picker: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "create-form")]
+    #[schemars(
+        title = "Create Form",
+        description = "The prompt form of a create recipe."
+    )]
     create_form: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "create-completions")]
+    #[schemars(
+        title = "Create Completions",
+        description = "The path completion list of the create form."
+    )]
     create_completions: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "progress-overlay")]
+    #[schemars(
+        title = "Progress Overlay",
+        description = "The overlay that shows a running task."
+    )]
     progress_overlay: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "error-overlay")]
+    #[schemars(
+        title = "Error Overlay",
+        description = "The overlay that shows an error."
+    )]
     error_overlay: Option<BTreeMap<String, String>>,
 }
 

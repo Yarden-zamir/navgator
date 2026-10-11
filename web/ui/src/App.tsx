@@ -12,6 +12,7 @@ import type { SortMode } from "./api/SortMode";
 import { buildKeymap, coreAction } from "./keys";
 import { ActionPicker, CreateForm, CreatePicker, ProgressOverlay, type CreateFormState } from "./Overlays";
 import { DetailPanel, PreviewPanel, type DetailTab, type TagEdit } from "./PreviewPanel";
+import { openSettings } from "./SettingsPage";
 import { toggleTagFilter } from "./Tag";
 import { ResultsPanel } from "./ResultsPanel";
 import { Cache, useCached } from "./useCached";
@@ -950,6 +951,9 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
         </div>
       </main>
       <footer className="footer">
+        <button type="button" className="small-button" title="Edit the navgator config" onClick={openSettings}>
+          ⚙ Settings
+        </button>
         {!overlay && footer}
         {notice && (
           <span className="notice" data-error={notice.error}>

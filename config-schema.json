@@ -462,6 +462,8 @@
       "type": "object",
       "properties": {
         "action-picker": {
+          "title": "Action Picker",
+          "description": "The action picker.",
           "default": null,
           "type": [
             "object",
@@ -472,6 +474,8 @@
           }
         },
         "create-completions": {
+          "title": "Create Completions",
+          "description": "The path completion list of the create form.",
           "default": null,
           "type": [
             "object",
@@ -482,6 +486,8 @@
           }
         },
         "create-form": {
+          "title": "Create Form",
+          "description": "The prompt form of a create recipe.",
           "default": null,
           "type": [
             "object",
@@ -492,6 +498,8 @@
           }
         },
         "create-picker": {
+          "title": "Create Picker",
+          "description": "The create recipe picker.",
           "default": null,
           "type": [
             "object",
@@ -502,6 +510,8 @@
           }
         },
         "detail": {
+          "title": "Detail",
+          "description": "The GitHub and Git detail panel.",
           "default": null,
           "type": [
             "object",
@@ -512,6 +522,8 @@
           }
         },
         "error-overlay": {
+          "title": "Error Overlay",
+          "description": "The overlay that shows an error.",
           "default": null,
           "type": [
             "object",
@@ -522,6 +534,8 @@
           }
         },
         "global": {
+          "title": "Global",
+          "description": "Keys in every context. Only cancel binds here.",
           "default": null,
           "type": [
             "object",
@@ -532,6 +546,8 @@
           }
         },
         "navigator": {
+          "title": "Navigator",
+          "description": "The search input and the result list.",
           "default": null,
           "type": [
             "object",
@@ -542,6 +558,8 @@
           }
         },
         "preview": {
+          "title": "Preview",
+          "description": "The preview panel.",
           "default": null,
           "type": [
             "object",
@@ -552,6 +570,8 @@
           }
         },
         "progress-overlay": {
+          "title": "Progress Overlay",
+          "description": "The overlay that shows a running task.",
           "default": null,
           "type": [
             "object",
@@ -562,6 +582,8 @@
           }
         },
         "tag-editor": {
+          "title": "Tag Editor",
+          "description": "The tag editor in the preview panel.",
           "default": null,
           "type": [
             "object",

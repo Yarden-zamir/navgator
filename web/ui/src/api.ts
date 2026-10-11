@@ -12,6 +12,8 @@ import type { Preview } from "./api/Preview";
 import type { Progress } from "./api/Progress";
 import type { Results } from "./api/Results";
 import type { RunResult } from "./api/RunResult";
+import type { SettingsUpdate } from "./api/SettingsUpdate";
+import type { SettingsView } from "./api/SettingsView";
 import type { SortMode } from "./api/SortMode";
 import type { Target } from "./api/Target";
 import type { TreeView } from "./api/TreeView";
@@ -47,6 +49,8 @@ function query(params: Record<string, string | boolean | undefined>): string {
 }
 
 export const api = {
+  settings: () => request<SettingsView>("GET", "/api/settings"),
+  saveSettings: (update: SettingsUpdate) => request<SettingsView>("PUT", "/api/settings", update),
   bootstrap: () => request<Bootstrap>("GET", "/api/bootstrap"),
   results: (q: string, sort: SortMode, remotes: boolean) =>
     request<Results>("GET", `/api/results?${query({ q, sort, remotes })}`),
