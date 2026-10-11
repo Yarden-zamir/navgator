@@ -255,6 +255,8 @@ npm run dev          # hot reload on :5173, proxies the API to a running `navgat
 npm run typecheck
 ```
 
+In T3 Code, the project action "Web preview" (from `t3.json`) runs `scripts/web-dev.sh` and opens the preview panel on the page. The script builds the current checkout, stops a `navgator web` that already holds port 4747, and starts the new build. The panel opens when the action starts, so reload it after the build.
+
 `cargo build` runs `npm run build` in `web/ui` when `web/ui/node_modules` exists and embeds `web/ui/dist` in the binary. Without `node_modules`, the binary serves a "UI not built" page.
 
 The TypeScript API types in `web/ui/src/api/` come from the Rust structs. After an API change, run `cargo test` and commit the regenerated files.

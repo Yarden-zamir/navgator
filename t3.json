@@ -1,0 +1,12 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Web preview",
+      "command": "scripts/web-dev.sh",
+      "icon": "play",
+      "previewUrl": "http://127.0.0.1:4747",
+      "autoOpenPreview": true
+    }
+  ]
+}
