@@ -88,22 +88,54 @@ fn theme_css(theme: &Value) -> String {
     if let Some(value) = string("canvasPattern") {
         push("--theme-canvas-pattern".to_string(), value);
     }
+    // Same fallback stacks as T3 (`apps/web/src/appearanceFonts.ts`): concrete
+    // monospace names first, because some engines alias `ui-monospace` to the
+    // proportional system font.
     let fonts = theme.get("fonts").and_then(Value::as_object);
     for (key, fallback) in [
-        ("sans", "system-ui, sans-serif"),
-        ("code", "ui-monospace, monospace"),
+        (
+            "sans",
+            "-apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif",
+        ),
+        (
+            "code",
+            "\"SF Mono\", \"SFMono-Regular\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        ),
     ] {
-        if let Some(family) = fonts
+        let families = fonts
             .and_then(|fonts: &Map<String, Value>| fonts.get(key))
             .and_then(Value::as_str)
-        {
-            push(
-                format!("--font-{key}"),
-                &format!("\"{family}\", {fallback}"),
-            );
+            .and_then(css_font_families);
+        if let Some(families) = families {
+            push(format!("--font-{key}"), &format!("{families}, {fallback}"));
         }
     }
     format!(":root {{\n{}\n}}\n", declarations.join("\n"))
+}
+
+/// A theme font is one family or a comma-separated list, as in T3. Quoted
+/// names and single identifiers (`monospace`) stay; other names get quotes.
+fn css_font_families(input: &str) -> Option<String> {
+    let families = input
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            let quoted = name.len() >= 2
+                && (name.starts_with('"') && name.ends_with('"')
+                    || name.starts_with('\'') && name.ends_with('\''));
+            let identifier = name.starts_with(|ch: char| ch.is_ascii_alphabetic())
+                && name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-');
+            if quoted || identifier {
+                name.to_string()
+            } else {
+                format!("\"{}\"", name.replace('"', ""))
+            }
+        })
+        .collect::<Vec<_>>();
+    (!families.is_empty()).then(|| families.join(", "))
 }
 
 fn kebab_case(key: &str) -> String {
@@ -139,7 +171,18 @@ mod tests {
         assert!(css.contains("--app-theme-canvas: #15122B;"));
         assert!(css.contains("--app-theme-surface-raised: #1D1938;"));
         assert!(css.contains("--theme-border-width: 2px;"));
-        assert!(css.contains("--font-sans: \"Bricolage Grotesque\", system-ui, sans-serif;"));
+        assert!(css.contains("--font-sans: \"Bricolage Grotesque\", -apple-system,"));
+    }
+
+    #[test]
+    fn keeps_a_font_stack_from_the_theme() {
+        let css = theme_css(&json!({
+            "fonts": { "code": "\"JetBrainsMono Nerd Font Mono\", \"JetBrains Mono\", monospace" }
+        }));
+        assert!(css.contains(
+            "--font-code: \"JetBrainsMono Nerd Font Mono\", \"JetBrains Mono\", monospace, \"SF Mono\","
+        ));
+        assert!(!css.contains("\"\""));
     }
 
     #[test]

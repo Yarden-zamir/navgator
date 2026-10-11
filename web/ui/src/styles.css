@@ -26,7 +26,7 @@
   --theme-border-width: 2px;
   --theme-shadow: 4px 4px 0 0 #000000;
   --font-sans: "Bricolage Grotesque", system-ui, sans-serif;
-  --font-code: "JetBrainsMono Nerd Font Mono", ui-monospace, monospace;
+  --font-code: "JetBrainsMono Nerd Font Mono", "JetBrains Mono", "SF Mono", Menlo, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
