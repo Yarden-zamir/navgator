@@ -1,13 +1,10 @@
 name: release
 
+# Every push to main releases. The bump script skips the release when no
+# commits follow the newest tag, so the bot's own release commit stops there.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - README.md
-      - Readme.md
-      - readme.md
-      - .github/workflows/**
   workflow_dispatch:
 
 # Never let two releases race: each pushes a version commit to main.
