@@ -12,6 +12,7 @@ import type { SortMode } from "./api/SortMode";
 import { buildKeymap, coreAction } from "./keys";
 import { ActionPicker, CreateForm, CreatePicker, ProgressOverlay, type CreateFormState } from "./Overlays";
 import { DetailPanel, PreviewPanel, type DetailTab, type TagEdit } from "./PreviewPanel";
+import { toggleTagFilter } from "./Tag";
 import { ResultsPanel } from "./ResultsPanel";
 import { Cache, useCached } from "./useCached";
 
@@ -422,6 +423,17 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
     return { ...edit, input: "", tags: edit.tags.includes(chosen) ? edit.tags : [...edit.tags, chosen] };
   };
 
+  const cancelTags = () => {
+    setTagEdit(null);
+    setFocus("preview");
+  };
+
+  const filterByTag = (tag: string) => {
+    setQuery((current) => toggleTagFilter(current, tag));
+    setStickToFirst(true);
+    setFocus("search");
+  };
+
   const confirmTags = async (edit: TagEdit) => {
     const committed = commitTagInput(edit);
     await api.saveTags(committed.path, committed.tags);
@@ -640,8 +652,7 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           return;
         case "cancel":
           event.preventDefault();
-          setTagEdit(null);
-          setFocus("preview");
+          cancelTags();
           return;
         case "copy-path":
           event.preventDefault();
@@ -896,6 +907,7 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
           }}
           onFocus={() => setFocus("search")}
           onSelect={selectIndex}
+          onTagClick={filterByTag}
           onActivate={(index) => {
             selectIndex(index);
             startTarget({ kind: "actions" }).catch(showError);
@@ -908,7 +920,8 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
             tabs={visibleTabs.map((index) => tabs[index]).filter((tab) => tab !== undefined)}
             activeTabIndex={visibleTabs.indexOf(activeTabIndex)}
             tree={tree}
-            tags={entry?.tags.map((tag) => tag.name) ?? []}
+            tags={entry ? entry.tags.map((tag) => tag.name) : null}
+            query={query}
             tagEdit={effectiveFocus === "tag-edit" ? tagEdit : null}
             tagInputRef={tagInputRef}
             focused={(effectiveFocus === "preview" || effectiveFocus === "tag-edit") && !overlay}
@@ -920,7 +933,11 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
               setTabVisibleIndex(index);
               setDetailIndex(0);
             }}
-            onTagInput={(input) => tagEdit && setTagEdit({ ...tagEdit, input })}
+            onTagClick={filterByTag}
+            onEditTags={() => editTags().catch(showError)}
+            onTagEdit={setTagEdit}
+            onSaveTags={() => tagEdit && confirmTags(tagEdit).catch(showError)}
+            onCancelTags={cancelTags}
           />
           <DetailPanel
             tabs={detailTabs}

@@ -252,19 +252,62 @@ mark {
   color: inherit;
 }
 
+/* --tag-hue comes from tagHue(), the same hue as the terminal UI. */
 .tag {
-  padding: 0 6px;
-  border: 1.5px solid var(--app-theme-border);
+  --tag-color: hsl(var(--tag-hue, 0) 60% 55%);
+  display: inline-flex;
+  align-items: center;
+  border: 1.5px solid var(--tag-color);
   border-radius: var(--radius);
   font-size: 11px;
   font-weight: 700;
-  background: var(--app-theme-surface-raised);
-  color: var(--app-theme-text);
+  font-style: italic;
+  background: color-mix(in srgb, var(--tag-color) 14%, transparent);
+  color: var(--tag-color);
+  white-space: nowrap;
+}
+
+.tag-name,
+.tag-remove {
+  padding: 0 6px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+}
+
+.tag button {
+  cursor: pointer;
+}
+
+.tag button:hover {
+  background: color-mix(in srgb, var(--tag-color) 28%, transparent);
+}
+
+.tag-remove {
+  padding: 0 5px;
+  border-left: 1px solid var(--tag-color);
+  font-style: normal;
 }
 
 .tag[data-matched="true"] {
-  background: var(--app-theme-accent);
-  color: var(--app-theme-accent-foreground);
+  background: var(--tag-color);
+  color: var(--app-theme-surface);
+}
+
+.link-button {
+  padding: 0 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--app-theme-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.link-button:hover {
+  color: var(--app-theme-accent);
 }
 
 .tabs {
@@ -354,8 +397,13 @@ pre,
 .tag-line {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 10px;
+}
+
+.tag-line.suggestions {
+  opacity: 0.75;
 }
 
 .tag-input {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import type { ResultRow } from "./api/ResultRow";
+import { Tag, queryHasTag } from "./Tag";
 
 type Props = {
   rows: ResultRow[];
@@ -13,6 +14,7 @@ type Props = {
   onFocus: () => void;
   onSelect: (index: number) => void;
   onActivate: (index: number) => void;
+  onTagClick: (tag: string) => void;
 };
 
 export function ResultsPanel(props: Props) {
@@ -65,9 +67,13 @@ export function ResultsPanel(props: Props) {
                 {[...row.tags]
                   .sort((left, right) => Number(right.matched) - Number(left.matched))
                   .map((tag) => (
-                    <span key={tag.name} className="tag" data-matched={tag.matched}>
-                      {tag.name}
-                    </span>
+                    <Tag
+                      key={tag.name}
+                      name={tag.name}
+                      matched={tag.matched}
+                      title={queryHasTag(props.query, tag.name) ? `Stop filtering by #${tag.name}` : `Filter by #${tag.name}`}
+                      onClick={() => props.onTagClick(tag.name)}
+                    />
                   ))}
               </span>
             )}

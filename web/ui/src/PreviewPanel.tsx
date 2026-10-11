@@ -4,6 +4,7 @@ import type { GithubView } from "./api/GithubView";
 import type { Preview } from "./api/Preview";
 import type { PreviewTabView } from "./api/PreviewTabView";
 import type { TreeView } from "./api/TreeView";
+import { Tag, queryHasTag } from "./Tag";
 import type { Loaded } from "./useCached";
 
 export type TagEdit = { path: string; tags: string[]; input: string; suggestions: string[] };
@@ -14,14 +15,20 @@ type PreviewProps = {
   tabs: PreviewTabView[];
   activeTabIndex: number;
   tree: Loaded<TreeView> | null;
-  tags: string[];
+  /// Null when the selection cannot hold tags (a remote branch).
+  tags: string[] | null;
+  query: string;
   tagEdit: TagEdit | null;
   tagInputRef: RefObject<HTMLInputElement | null>;
   focused: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
   onFocus: () => void;
   onSelectTab: (index: number) => void;
-  onTagInput: (value: string) => void;
+  onTagClick: (tag: string) => void;
+  onEditTags: () => void;
+  onTagEdit: (edit: TagEdit) => void;
+  onSaveTags: () => void;
+  onCancelTags: () => void;
 };
 
 export function PreviewPanel(props: PreviewProps) {
@@ -47,37 +54,84 @@ export function PreviewPanel(props: PreviewProps) {
         </nav>
       )}
       <div className="panel-body" ref={props.scrollRef}>
-        {(props.tags.length > 0 || props.tagEdit) && (
-          <div className="tag-line">
-            {(props.tagEdit?.tags ?? props.tags).map((tag) => (
-              <span key={tag} className="tag">
-                {tag}
-              </span>
-            ))}
-            {props.tagEdit && (
-              <>
-                <input
-                  ref={props.tagInputRef}
-                  className="tag-input"
-                  value={props.tagEdit.input}
-                  placeholder="new tag"
-                  list="tag-suggestions"
-                  spellCheck={false}
-                  autoFocus
-                  onChange={(event) => props.onTagInput(event.target.value)}
+        {props.tagEdit ? (
+          <TagEditor
+            edit={props.tagEdit}
+            inputRef={props.tagInputRef}
+            onChange={props.onTagEdit}
+            onSave={props.onSaveTags}
+            onCancel={props.onCancelTags}
+          />
+        ) : (
+          props.tags && (
+            <div className="tag-line">
+              {props.tags.map((tag) => (
+                <Tag
+                  key={tag}
+                  name={tag}
+                  matched={queryHasTag(props.query, tag)}
+                  title={queryHasTag(props.query, tag) ? `Stop filtering by #${tag}` : `Filter by #${tag}`}
+                  onClick={() => props.onTagClick(tag)}
                 />
-                <datalist id="tag-suggestions">
-                  {props.tagEdit.suggestions.map((tag) => (
-                    <option key={tag} value={tag} />
-                  ))}
-                </datalist>
-              </>
-            )}
-          </div>
+              ))}
+              <button type="button" className="link-button" onClick={props.onEditTags}>
+                {props.tags.length === 0 ? "+ Add tags" : "Edit tags"}
+              </button>
+            </div>
+          )
         )}
         <PreviewBody preview={props.preview} tree={props.tree} />
       </div>
     </section>
+  );
+}
+
+function TagEditor(props: {
+  edit: TagEdit;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onChange: (edit: TagEdit) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const { edit } = props;
+  const lower = edit.input.trim().toLowerCase();
+  const suggestions = edit.suggestions.filter(
+    (tag) => !edit.tags.includes(tag) && tag.toLowerCase().includes(lower),
+  );
+  const add = (tag: string) => {
+    props.onChange({ ...edit, input: "", tags: edit.tags.includes(tag) ? edit.tags : [...edit.tags, tag] });
+    props.inputRef.current?.focus();
+  };
+  return (
+    <div className="tag-editor">
+      <div className="tag-line">
+        {edit.tags.map((tag) => (
+          <Tag key={tag} name={tag} onRemove={() => props.onChange({ ...edit, tags: edit.tags.filter((kept) => kept !== tag) })} />
+        ))}
+        <input
+          ref={props.inputRef}
+          className="tag-input"
+          value={edit.input}
+          placeholder="new tag"
+          spellCheck={false}
+          autoFocus
+          onChange={(event) => props.onChange({ ...edit, input: event.target.value })}
+        />
+        <button type="button" className="link-button" onClick={props.onSave}>
+          Save
+        </button>
+        <button type="button" className="link-button" onClick={props.onCancel}>
+          Cancel
+        </button>
+      </div>
+      {suggestions.length > 0 && (
+        <div className="tag-line suggestions">
+          {suggestions.map((tag) => (
+            <Tag key={tag} name={tag} title={`Add ${tag}`} onClick={() => add(tag)} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
