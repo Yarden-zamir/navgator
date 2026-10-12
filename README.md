@@ -271,7 +271,7 @@ The TypeScript API types in `web/ui/src/api/` come from the Rust structs. After 
 cargo build --release
 ```
 
-A release build embeds the web UI only when `web/ui/node_modules` exists. Run `npm ci` in `web/ui` first.
+A release build embeds the web UI only when `web/ui/node_modules` exists. Run `npm ci` in `web/ui` first. The Homebrew formula does this before `cargo install`.
 
 ## Check
 

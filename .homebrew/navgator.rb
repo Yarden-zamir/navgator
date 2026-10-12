@@ -9,11 +9,15 @@ class Navgator < Formula
   license "MIT"
   head "https://github.com/Yarden-zamir/navgator.git", branch: "main"
 
+  depends_on "node" => :build
   depends_on "rust" => :build
   depends_on "erdtree"
   depends_on "gh"
 
   def install
+    # build.rs builds the web UI and embeds it only when web/ui/node_modules exists.
+    # Without it, `navgator web` serves a "UI not built" page.
+    system "npm", "ci", "--prefix", "web/ui", "--no-audit", "--no-fund"
     system "cargo", "install", *std_cargo_args
     pkgshare.install "scripts/navgator.zsh"
   end
