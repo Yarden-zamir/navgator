@@ -56,3 +56,4 @@
 40. A click on the backdrop or the × button closes an overlay. A running task cannot close.
 41. Notices show as toasts. A click dismisses a toast.
 42. The page title names the selected result.
+43. When the page runs inside a frame, a run action asks the host to close the frame: the page posts `{ type: "t3:close-overlay" }` to the parent window. The create flow posts nothing.

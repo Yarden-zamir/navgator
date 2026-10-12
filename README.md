@@ -240,6 +240,7 @@ Differences from the terminal UI:
 - Actions run without a terminal: stdin is closed and the output is captured. Interactive tools such as `claude` need an action that opens a terminal, for example `herdr-open-path {path} claude`.
 - `run-and-close` runs the action like `run`.
 - After a create recipe, the action picker opens for the new path.
+- Inside a frame, such as the T3 Code app overlay, running an action asks the host to close the frame. Creating a worktree does not.
 - The current working directory is not pinned to the top.
 
 The "Settings" button (or `#settings` in the URL) opens a form for the user config file. The form comes from the config schema and has path completion, action id completion and key recording. A save keeps your comments, and the server loads the new config at once. The TOML view edits the file text. A click on a tag filters the results by that tag. Panels resize by drag, a right-click on a row opens its actions, and F1 lists every key binding.

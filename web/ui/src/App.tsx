@@ -256,6 +256,9 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
     try {
       const result = await api.runAction(ref, path);
       setOverlay(null);
+      // In a host page's overlay (T3 Code), a run action is a deliberate choice: the user is done
+      // with the navigator, so ask the host to close it. The create flow does not come here.
+      if (window.parent !== window) window.parent.postMessage({ type: "t3:close-overlay" }, "*");
       setNotice({
         text: result.stillRunning ? `${label} is still running` : result.output ?? `Ran ${label}`,
         error: false,
