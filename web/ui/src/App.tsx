@@ -4,6 +4,7 @@ import type { ActionRef } from "./api/ActionRef";
 import type { BindingContext } from "./api/BindingContext";
 import type { Bootstrap } from "./api/Bootstrap";
 import type { CoreAction } from "./api/CoreAction";
+import type { LocalPreview } from "./api/LocalPreview";
 import type { Preview } from "./api/Preview";
 import type { PreviewTabView } from "./api/PreviewTabView";
 import type { ResultRow } from "./api/ResultRow";
@@ -57,6 +58,13 @@ function visibleTabIndexes(tabs: PreviewTabView[], filter: string): number[] {
     return tab !== undefined && (tab.label.toLowerCase().includes(needle) || tab.path.toLowerCase().includes(needle));
   });
   return matches.length > 0 ? matches : all;
+}
+
+/** The tab a result opens on: its preferred worktree, else the first tab. */
+function preferredTabIndex(preview: LocalPreview): number {
+  const preferred = preview.preferredPath;
+  const index = preferred ? preview.tabs.findIndex((tab) => tab.path === preferred) : -1;
+  return Math.max(index, 0);
 }
 
 function filterCreates(bootstrap: Bootstrap, query: string) {
@@ -190,10 +198,26 @@ export function App({ bootstrap }: { bootstrap: Bootstrap }) {
       setTabVisibleIndex(0);
       return;
     }
-    const preferred = previewData.preferredPath;
-    const index = preferred ? previewData.tabs.findIndex((tab) => tab.path === preferred) : -1;
-    setTabVisibleIndex(Math.max(index, 0));
+    setTabVisibleIndex(preferredTabIndex(previewData));
   }, [previewData]);
+
+  // Load the rows next to the selection in the background, so arrow keys show them at once.
+  // Limit: one row behind and two ahead; widen the range when longer jumps still wait.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      for (const row of rows.slice(Math.max(selectedIndex - 1, 0), selectedIndex + 3)) {
+        caches.preview
+          .get(row.id)
+          .then((data) => {
+            const tab = data.kind === "local" ? data.tabs[preferredTabIndex(data)] : undefined;
+            return tab && caches.tree.get(tab.path);
+          })
+          // A failed load leaves the cache; the row reports it when it is selected.
+          .catch(() => {});
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [caches, rows, selectedIndex]);
 
   useEffect(() => {
     previewScrollRef.current?.scrollTo({ top: 0 });

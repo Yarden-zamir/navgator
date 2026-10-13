@@ -38,6 +38,26 @@ pub fn git_is_inside_work_tree(repo_dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// What kind of repository `repo_dir` holds. Both are `false` outside a repository.
+pub struct GitRepositoryKind {
+    pub inside_work_tree: bool,
+    pub bare: bool,
+}
+
+/// One git call that answers both `git_is_inside_work_tree` and `git_is_bare_repository`.
+pub fn git_repository_kind(repo_dir: &Path) -> GitRepositoryKind {
+    let output = run_git_command_allow_empty(
+        repo_dir,
+        &["rev-parse", "--is-inside-work-tree", "--is-bare-repository"],
+    )
+    .unwrap_or_default();
+    let mut lines = output.lines().map(|line| line.trim() == "true");
+    GitRepositoryKind {
+        inside_work_tree: lines.next().unwrap_or(false),
+        bare: lines.next().unwrap_or(false),
+    }
+}
+
 pub fn git_is_bare_repository(repo_dir: &Path) -> bool {
     run_git_command_allow_empty(repo_dir, &["rev-parse", "--is-bare-repository"])
         .map(|value| value.trim() == "true")
@@ -45,14 +65,16 @@ pub fn git_is_bare_repository(repo_dir: &Path) -> bool {
 }
 
 pub fn git_worktrees_for_path(path: &Path) -> Vec<GitWorktree> {
-    let Some(repo_dir) = git_command_dir_for_path(path) else {
-        return Vec::new();
-    };
-    let Some(output) = run_git_command_allow_empty(&repo_dir, &["worktree", "list", "--porcelain"])
-    else {
-        return Vec::new();
-    };
-    parse_git_worktree_list(&output)
+    git_command_dir_for_path(path)
+        .map(|repo_dir| git_worktrees_in(&repo_dir))
+        .unwrap_or_default()
+}
+
+/// The worktrees of the repository at `repo_dir`, a result of `git_command_dir_for_path`.
+pub fn git_worktrees_in(repo_dir: &Path) -> Vec<GitWorktree> {
+    run_git_command_allow_empty(repo_dir, &["worktree", "list", "--porcelain"])
+        .map(|output| parse_git_worktree_list(&output))
+        .unwrap_or_default()
 }
 
 pub fn git_worktree_root_for_path(path: &Path) -> Option<String> {
@@ -62,9 +84,13 @@ pub fn git_worktree_root_for_path(path: &Path) -> Option<String> {
 }
 
 pub fn git_default_branch_for_path(path: &Path) -> Option<String> {
-    let repo_dir = git_command_dir_for_path(path)?;
+    git_default_branch_in(&git_command_dir_for_path(path)?)
+}
+
+/// The `origin` default branch of the repository at `repo_dir`, a result of `git_command_dir_for_path`.
+pub fn git_default_branch_in(repo_dir: &Path) -> Option<String> {
     let output = run_git_command_allow_empty(
-        &repo_dir,
+        repo_dir,
         &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
     )?;
     output
@@ -758,6 +784,34 @@ mod tests {
             &basename_branches,
         );
         assert_eq!(name, "auth");
+    }
+
+    #[test]
+    fn repository_kind_tells_bare_worktree_and_plain_folders_apart() {
+        let root = env::temp_dir().join(format!("navgator-repository-kind-{}", std::process::id()));
+        let bare = root.join(".bare");
+        let main = root.join("main");
+        let plain = root.join("plain");
+        fs::create_dir_all(&plain).expect("create plain folder");
+        run_git(&["init", "--bare", bare.to_str().expect("bare path")]);
+        run_git(&[
+            "--git-dir",
+            bare.to_str().expect("bare path"),
+            "worktree",
+            "add",
+            main.to_str().expect("main path"),
+            "-b",
+            "main",
+        ]);
+
+        let kind = git_repository_kind(&bare);
+        assert!(kind.bare && !kind.inside_work_tree);
+        let kind = git_repository_kind(&main);
+        assert!(!kind.bare && kind.inside_work_tree);
+        let kind = git_repository_kind(&plain);
+        assert!(!kind.bare && !kind.inside_work_tree);
+
+        fs::remove_dir_all(&root).expect("remove test repositories");
     }
 
     #[test]

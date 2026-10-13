@@ -57,3 +57,4 @@
 41. Notices show as toasts. A click dismisses a toast.
 42. The page title names the selected result.
 43. When the page runs inside a frame, a run action asks the host to close the frame: the page posts `{ type: "t3:close-overlay" }` to the parent window. The create flow posts nothing.
+44. When the selection stays on a row, the page loads the preview of that row, the row before it and the two rows after it in the background.

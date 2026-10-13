@@ -115,6 +115,11 @@ pub struct PreviewTarget {
     pub label: String,
 }
 
+pub struct PreviewTargets {
+    pub tabs: Vec<PreviewTarget>,
+    pub selected_repo_is_bare: bool,
+}
+
 pub struct GitWorktree {
     pub path: String,
     pub branch: Option<String>,

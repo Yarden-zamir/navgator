@@ -1,11 +1,11 @@
 use crate::commands::{run_command_output, run_git_command_allow_empty};
 use crate::git::{
-    git_command_dir_for_path, git_default_branch_for_path, git_is_bare_repository,
-    git_is_inside_work_tree, git_worktree_label, git_worktrees_for_path,
+    git_command_dir_for_path, git_default_branch_in, git_is_bare_repository, git_repository_kind,
+    git_worktree_label, git_worktrees_in,
 };
 use crate::model::{
     DetailTab, GitResult, GitWorktree, PreviewColors, PreviewData, PreviewSettings, PreviewTab,
-    PreviewTarget,
+    PreviewTarget, PreviewTargets,
 };
 use crate::search::entry_name;
 use gator::config::home_dir;
@@ -210,11 +210,11 @@ pub fn build_preview_data(
     text: Color,
     preview_settings: PreviewSettings,
 ) -> PreviewData {
-    let selected_repo_is_bare = git_command_dir_for_path(Path::new(path))
-        .map(|dir| git_is_bare_repository(&dir))
-        .unwrap_or(false);
-    let targets = preview_targets_for_path(path, preview_settings.shorten_worktree_tab_labels);
-    let previews = targets
+    let PreviewTargets {
+        tabs,
+        selected_repo_is_bare,
+    } = preview_targets_for_path(path, preview_settings.shorten_worktree_tab_labels);
+    let previews = tabs
         .into_iter()
         .map(|target| PreviewTab {
             path: target.path.clone(),
@@ -276,35 +276,44 @@ pub fn build_remote_branch_preview_data(
     }
 }
 
-pub fn preview_targets_for_path(
-    path: &str,
-    shorten_worktree_tab_labels: bool,
-) -> Vec<PreviewTarget> {
-    let fallback = PreviewTarget {
+pub fn preview_targets_for_path(path: &str, shorten_worktree_tab_labels: bool) -> PreviewTargets {
+    let fallback = || PreviewTarget {
         path: path.to_string(),
         label: entry_name(path),
     };
-    let path_buf = Path::new(path);
-    let worktrees = git_worktrees_for_path(path_buf);
-    if worktrees.is_empty() {
-        return vec![fallback];
-    }
+    let Some(repo_dir) = git_command_dir_for_path(Path::new(path)) else {
+        return PreviewTargets {
+            tabs: vec![fallback()],
+            selected_repo_is_bare: false,
+        };
+    };
+    // Each git process start costs up to a second on a loaded machine, so the
+    // independent calls run in parallel.
+    let (worktrees, default_branch, selected_repo_is_bare) = thread::scope(|scope| {
+        let worktrees = scope.spawn(|| git_worktrees_in(&repo_dir));
+        let default_branch = scope.spawn(|| git_default_branch_in(&repo_dir));
+        let is_bare = git_is_bare_repository(&repo_dir);
+        (
+            worktrees.join().expect("git worktree list thread panicked"),
+            default_branch
+                .join()
+                .expect("git default branch thread panicked"),
+            is_bare,
+        )
+    });
 
     let mut non_bare: Vec<&GitWorktree> =
         worktrees.iter().filter(|worktree| !worktree.bare).collect();
-    let default_branch = git_default_branch_for_path(path_buf);
     sort_worktrees_default_first(&mut non_bare, default_branch.as_deref());
-    let selected_is_bare = git_command_dir_for_path(path_buf)
-        .map(|dir| git_is_bare_repository(&dir))
-        .unwrap_or(false);
-    if selected_is_bare && !non_bare.is_empty() {
-        return preview_targets_from_worktrees(&non_bare, shorten_worktree_tab_labels);
+    let tabs = if (selected_repo_is_bare && !non_bare.is_empty()) || non_bare.len() > 1 {
+        preview_targets_from_worktrees(&non_bare, shorten_worktree_tab_labels)
+    } else {
+        vec![fallback()]
+    };
+    PreviewTargets {
+        tabs,
+        selected_repo_is_bare,
     }
-    if non_bare.len() > 1 {
-        return preview_targets_from_worktrees(&non_bare, shorten_worktree_tab_labels);
-    }
-
-    vec![fallback]
 }
 
 pub fn sort_worktrees_default_first(
@@ -397,60 +406,71 @@ fn output_lines(output: &str) -> Vec<String> {
 /// Collect the git panel facts for `path`. Returns `None` when `path` is not
 /// in a repository or when git has nothing to show.
 pub fn git_summary_for_path(path: &str, selected_repo_is_bare: bool) -> Option<GitSummary> {
-    let path_buf = Path::new(path);
-    let repo_dir = git_command_dir_for_path(path_buf)?;
-    let inside_work_tree = git_is_inside_work_tree(&repo_dir);
-    let bare_repository = git_is_bare_repository(&repo_dir);
-    if !inside_work_tree && !bare_repository {
+    let repo_dir = git_command_dir_for_path(Path::new(path))?;
+    let kind = git_repository_kind(&repo_dir);
+    if !kind.inside_work_tree && !kind.bare {
         return None;
     }
 
-    let mut summary = GitSummary {
-        bare_repository: selected_repo_is_bare,
-        ..GitSummary::default()
-    };
-
-    if inside_work_tree {
-        summary.branch = run_git_command_allow_empty(&repo_dir, &["status", "-sb"])
-            .and_then(|output| output.lines().next().map(str::to_string))
-            .map(|line| line.trim_start_matches("## ").to_string())
-            .filter(|branch| !branch.trim().is_empty());
-    }
-
-    if bare_repository {
-        summary.worktrees = Some(
-            git_worktrees_for_path(path_buf)
-                .iter()
-                .filter(|worktree| !worktree.bare)
-                .map(|worktree| GitSummaryWorktree {
-                    label: git_worktree_label(worktree, false),
-                    path: worktree.path.clone(),
-                })
-                .collect(),
+    // Each git process start costs up to a second on a loaded machine, so the
+    // independent calls run in parallel.
+    thread::scope(|scope| {
+        let repo_dir = &repo_dir;
+        let git = |enabled: bool, args: &'static [&'static str]| {
+            enabled.then(|| scope.spawn(move || run_git_command_allow_empty(repo_dir, args)))
+        };
+        let status = git(kind.inside_work_tree, &["status", "-sb"]);
+        let log = git(true, &["log", "-3", "--pretty=format:%s (%cr)"]);
+        let staged = git(kind.inside_work_tree, &["diff", "--stat", "--cached"]);
+        let unstaged = git(kind.inside_work_tree, &["diff", "--stat"]);
+        let untracked = git(
+            kind.inside_work_tree,
+            &["ls-files", "--others", "--exclude-standard"],
         );
-    }
-
-    match run_git_command_allow_empty(&repo_dir, &["log", "-3", "--pretty=format:%s (%cr)"]) {
-        Some(output) => summary.recent_commits = output_lines(output.trim_end()),
-        None if inside_work_tree => return None,
-        None => {}
-    }
-    summary.recent_commits.retain(|line| !line.is_empty());
-
-    if inside_work_tree {
-        summary.staged = run_git_command_allow_empty(&repo_dir, &["diff", "--stat", "--cached"])
-            .map(|output| output_lines(&output))
-            .unwrap_or_default();
-        summary.unstaged = run_git_command_allow_empty(&repo_dir, &["diff", "--stat"])
-            .map(|output| output_lines(&output))
-            .unwrap_or_default();
-        summary.untracked =
-            run_git_command_allow_empty(&repo_dir, &["ls-files", "--others", "--exclude-standard"])
+        let worktrees = kind
+            .bare
+            .then(|| scope.spawn(|| git_worktrees_in(repo_dir)));
+        let output = |handle: Option<thread::ScopedJoinHandle<'_, Option<String>>>| {
+            handle.and_then(|handle| handle.join().expect("git summary thread panicked"))
+        };
+        let lines = |output: Option<String>| {
+            output
                 .map(|output| output_lines(&output))
-                .unwrap_or_default();
-    }
+                .unwrap_or_default()
+        };
 
-    (summary != GitSummary::default()).then_some(summary)
+        let mut summary = GitSummary {
+            bare_repository: selected_repo_is_bare,
+            branch: output(status)
+                .and_then(|output| output.lines().next().map(str::to_string))
+                .map(|line| line.trim_start_matches("## ").to_string())
+                .filter(|branch| !branch.trim().is_empty()),
+            worktrees: worktrees.map(|handle| {
+                handle
+                    .join()
+                    .expect("git worktree list thread panicked")
+                    .iter()
+                    .filter(|worktree| !worktree.bare)
+                    .map(|worktree| GitSummaryWorktree {
+                        label: git_worktree_label(worktree, false),
+                        path: worktree.path.clone(),
+                    })
+                    .collect()
+            }),
+            ..GitSummary::default()
+        };
+        match output(log) {
+            Some(output) => summary.recent_commits = output_lines(output.trim_end()),
+            None if kind.inside_work_tree => return None,
+            None => {}
+        }
+        summary.recent_commits.retain(|line| !line.is_empty());
+        summary.staged = lines(output(staged));
+        summary.unstaged = lines(output(unstaged));
+        summary.untracked = lines(output(untracked));
+
+        (summary != GitSummary::default()).then_some(summary)
+    })
 }
 
 fn build_git_text_for_preview(

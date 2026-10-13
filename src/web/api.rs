@@ -16,8 +16,7 @@ use crate::create::{
 };
 use crate::git::{
     add_worktree_for_remote_with_progress, checkout_remote_branch_with_progress,
-    git_command_dir_for_path, git_is_bare_repository, remove_worktree_safely_with_progress,
-    selectable_worktree_path_for_project,
+    remove_worktree_safely_with_progress, selectable_worktree_path_for_project,
 };
 use crate::github::{github_content_for_path, github_url_for_path, GithubRepoSummary};
 use crate::metadata::{format_date_display, format_epoch_minutes};
@@ -543,10 +542,11 @@ pub async fn preview(State(app): AppState, Query(query): Query<EntryQuery>) -> A
             }),
             NavigateEntryKind::Project | NavigateEntryKind::Worktree { .. } => {
                 let path = entry.preview_root_path.clone();
+                let targets = preview_targets_for_path(&path, shorten);
                 Preview::Local(LocalPreview {
-                    selected_repo_is_bare: git_command_dir_for_path(Path::new(&path))
-                        .is_some_and(|dir| git_is_bare_repository(&dir)),
-                    tabs: preview_targets_for_path(&path, shorten)
+                    selected_repo_is_bare: targets.selected_repo_is_bare,
+                    tabs: targets
+                        .tabs
                         .into_iter()
                         .map(|target| PreviewTabView {
                             path: target.path,
