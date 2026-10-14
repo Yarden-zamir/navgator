@@ -231,6 +231,7 @@ navgator web
 - If the local server does not run yet, the command starts it in the foreground and opens the page. Ctrl+C stops the server.
 - If the server runs already, the command only opens the page and exits. Thus it is safe to bind to a shortcut or a launcher.
 - If another program uses the port, the command fails; pick another port.
+- When the `navgator` binary changes, for example after `brew upgrade`, the server stops. Start it again to run the new version.
 
 Options: `--port PORT`, `--no-open` (start or find the server, do not open a browser), and `--config-entry TOML` (repeatable, as for the terminal UI).
 
