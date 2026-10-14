@@ -12,6 +12,7 @@
 8. `--no-open` starts or finds the server and does not open a browser.
 9. The server loads config like the terminal UI, including `--config-entry` values.
 10. The server reads the same caches, tags and usage history as the terminal UI.
+45. When the navgator binary on disk changes, the server stops. The next start runs the new version.
 
 ## Navigator
 

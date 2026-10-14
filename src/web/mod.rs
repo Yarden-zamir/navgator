@@ -21,7 +21,7 @@ use std::{
     io::{Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpStream},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 pub const DEFAULT_PORT: u16 = 4747;
@@ -44,7 +44,8 @@ enum PortState {
 }
 
 /// Open the page of a running server, or start one and open its page.
-/// A started server runs in the foreground until the process stops.
+/// A started server runs in the foreground until the process stops or the
+/// navgator binary on disk changes.
 pub fn run(options: WebOptions) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{}", options.port);
     match probe(options.port) {
@@ -59,9 +60,14 @@ pub fn run(options: WebOptions) -> Result<(), String> {
             "another program uses port {}; pick a free one with --port",
             options.port
         )),
-        PortState::Free => tokio::runtime::Runtime::new()
-            .map_err(|error| format!("cannot start the async runtime: {error}"))?
-            .block_on(serve(options, url)),
+        PortState::Free => {
+            let runtime = tokio::runtime::Runtime::new()
+                .map_err(|error| format!("cannot start the async runtime: {error}"))?;
+            let result = runtime.block_on(serve(options, url));
+            // Do not wait for open event streams or running actions.
+            runtime.shutdown_background();
+            result
+        }
     }
 }
 
@@ -94,9 +100,48 @@ async fn serve(options: WebOptions, url: String) -> Result<(), String> {
     if options.open {
         crate::commands::open_url(&url)?;
     }
-    axum::serve(listener, router(app, options.port))
-        .await
-        .map_err(|error| format!("server stopped: {error}"))
+    tokio::select! {
+        result = axum::serve(listener, router(app, options.port)) => {
+            result.map_err(|error| format!("server stopped: {error}"))
+        }
+        () = binary_replaced() => {
+            println!("navgator web stops: the navgator binary changed, start it again to run the new version");
+            Ok(())
+        }
+    }
+}
+
+/// Resolves when the navgator binary on disk changes, for example after
+/// `brew upgrade` or `cargo install`. A host that starts the server when the
+/// port is free (T3 Code) then starts the new version.
+///
+/// Limit: a Homebrew upgrade with cleanup turned off keeps the old keg, so a
+/// server started from the keg path sees no change. Watch the `bin` link too
+/// if that setup comes up.
+async fn binary_replaced() {
+    let Some(started) = binary_stamp() else {
+        eprintln!(
+            "navgator web: cannot read the navgator binary, so it does not stop on an upgrade"
+        );
+        return std::future::pending().await;
+    };
+    let mut tick = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        tick.tick().await;
+        if binary_stamp() != Some(started) {
+            return;
+        }
+    }
+}
+
+/// The modification time of the running binary, or `None` when it is gone.
+fn binary_stamp() -> Option<SystemTime> {
+    std::env::current_exe()
+        .ok()?
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()
 }
 
 fn router(app: Arc<app::App>, port: u16) -> Router {
