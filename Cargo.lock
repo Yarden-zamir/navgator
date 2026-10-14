@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "navgator"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "ansi-to-tui",
  "axum",
