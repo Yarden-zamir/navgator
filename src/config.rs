@@ -1378,7 +1378,6 @@ mod tests {
                 "open-intellij",
                 "open-repo-online",
                 "open-claude-session",
-                "open-opencode-session",
             ]
         );
         assert!(config.create.is_some());

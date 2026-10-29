@@ -56,8 +56,8 @@
 56. Built-in Open repo online closes navgator after launching.
 57. Built-in Open Claude session runs claude with current_dir set to {path}.
 58. Built-in Open Claude session closes navgator before the session starts.
-59. Built-in Open OpenCode session runs opencode with current_dir set to {path}.
-60. Built-in Open OpenCode session closes navgator before the session starts.
+59. Removed: navgator has no built-in OpenCode action.
+60. Removed: navgator has no built-in OpenCode action.
 61. Command actions have type = command.
 62. Command actions require command.
 63. Command actions accept args as an array of strings.

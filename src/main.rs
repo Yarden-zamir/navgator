@@ -3876,7 +3876,6 @@ mod tests {
         assert!(labels.contains(&"Open IntelliJ"));
         assert!(labels.contains(&"Open repo online"));
         assert!(labels.contains(&"Open Claude session"));
-        assert!(labels.contains(&"Open OpenCode session"));
         assert!(actions.iter().all(|action| action.icon.is_some()));
     }
 
@@ -3921,14 +3920,14 @@ mod tests {
             .map(|index| actions[*index].label.as_str())
             .collect::<Vec<&str>>();
 
-        assert_eq!(labels, vec!["Open VS Code", "Open OpenCode session"]);
+        assert_eq!(labels, vec!["Open VS Code"]);
     }
 
     #[test]
     fn action_picker_allowlist_filters_and_orders_actions() {
         let actions = model::default_action_definitions();
         let picker = vec![
-            "open-opencode-session".to_string(),
+            "open-claude-session".to_string(),
             "open-vs-code".to_string(),
         ];
         let indexes = filtered_action_indexes(&actions, Some(&picker), "", Some("/tmp"));
@@ -3937,7 +3936,7 @@ mod tests {
             .map(|index| actions[*index].label.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(labels, vec!["Open OpenCode session", "Open VS Code"]);
+        assert_eq!(labels, vec!["Open Claude session", "Open VS Code"]);
     }
 
     #[test]
