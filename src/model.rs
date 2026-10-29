@@ -425,17 +425,6 @@ pub fn default_action_definitions() -> Vec<ActionDefinition> {
                 current_dir: Some("{path}".to_string()),
             },
         },
-        ActionDefinition {
-            id: Some("open-opencode-session".to_string()),
-            label: "Open OpenCode session".to_string(),
-            icon: Some("󰘦".to_string()),
-            file_condition: None,
-            kind: ActionKind::Command {
-                command: "opencode".to_string(),
-                args: Vec::new(),
-                current_dir: Some("{path}".to_string()),
-            },
-        },
     ]
 }
 
